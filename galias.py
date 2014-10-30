@@ -59,11 +59,7 @@ def delete_from_alias(group_service, alias, address):
             raise e
         return
     
-    members = group_service.RetrieveAllMembers(alias)
-    memberlist = []
-    for member in members:
-        memberlist.append(member["memberId"])
-    if address not in memberlist:
+    if not group_service.IsMember(address, alias):
         print "*" * 70
         print "* " + address + " is not in " + alias
         print "*" * 70
