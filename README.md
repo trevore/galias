@@ -11,9 +11,10 @@ sudo pip install -U gdata
 
 Usage: galias.py [options] COMMAND 
         
-Possible COMANDS are:         
+Possible COMMANDS are:         
     listall - List all aliases         
     list <alias> - list the specified alias         
+    list_memberships [addresses] - list alias memberships for an optional list of addresses
     add <alias> <destination> - add the <destination> to the <alias>         
     delete <alias> <destination> - delete the <destination> from the <alias>         
 

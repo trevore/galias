@@ -15,6 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+from collections import defaultdict
 import gdata.apps.groups.service
 
 def print_all_members(group_service):
@@ -31,6 +32,33 @@ def print_members(group_service, group_id):
     for user in group_service.RetrieveAllMembers(group_id): 
         print gid + "->", user['memberId']
         gid = group_id + " "
+
+def print_memberships(address, groups):
+    # Takes a string and a list of groups
+    print address + ":"
+    for group in groups: 
+        print "  " + group
+    print
+
+def retrieve_list_memberships(group_service):
+    users = defaultdict(list)
+    groups = group_service.RetrieveAllGroups()
+    for group in groups:
+        for user in group_service.RetrieveAllMembers(group["groupId"]): 
+            users[user["memberId"]].append(group["groupId"])
+    return users
+
+def print_list_memberships(group_service, users):
+    user_memberships = retrieve_list_memberships(group_service)
+    if len(users) == 0:
+        userlist = sorted(user_memberships)
+    else:
+        userlist = users
+
+    for user in userlist:
+        print_memberships(user, user_memberships[user])
+
+
 
 def add_to_alias(group_service, alias, address):
     try:
@@ -99,6 +127,7 @@ def main():
         \nPossible COMANDS are: \
         \n    listall - List all aliases \
         \n    list <alias> - list the specified alias \
+        \n    list_memberships [addresses] - list alias memberships for a list of addresses (or all if addresses are missing) \
         \n    add <alias> <destination> - add the <destination> to the <alias> \
         \n    delete <alias> <destination> - delete the <destination> from the <alias> \
         "
@@ -145,6 +174,12 @@ def main():
     elif command == "list":
         print "listing alias", args[1]
         list_group(group_service, args[1])
+    elif command == "list_memberships":
+        print "listing alias memberships"
+        if len(args) == 1:
+            print_list_memberships(group_service, [])
+        else:
+            print_list_memberships(group_service, args[1:])
     elif command == "add":
         print "%s add %s" % (args[1], args[2])
         add_to_alias(group_service, args[1], args[2])
