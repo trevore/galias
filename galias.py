@@ -18,20 +18,50 @@ limitations under the License.
 from collections import defaultdict
 import gdata.apps.groups.service
 
+def get_group_service(username, password, domain):
+    """Construct a Service object and authenticate"""
+    group_service = gdata.apps.groups.service.GroupsService(email=username, domain=domain, password=password) 
+    group_service.ProgrammaticLogin()
+    return group_service
+
+def get_all_groups(group_service):
+    return group_service.RetrieveAllGroups()
+
+def get_group(group_service, group_name):
+    return group_service.RetrieveGroup(group_name)
+
+def get_group_members(group_service, group_email):
+    return group_service.RetrieveAllMembers(group_email)
+
+def create_group(group_service, group_id, group_name, description, email_permission):
+    return group_service.CreateGroup(group_id, group_name, description, email_permission)
+
+def remove_group(group_service, group_email):
+    return group_service.DeleteGroup(group_email)
+
+def add_group_member(group_service, group_email, email_address):
+    return group_service.AddMemberToGroup(email_address, group_email)
+
+def remove_group_member(group_service, email_address, group_email):
+    return group_service.RemoveMemberFromGroup(email_address, group_email)
+
+def is_group_member(group_service, email_address, group_email):
+    return group_service.IsMember(email_address, group_email)
+
 def print_all_members(group_service):
-    groups = group_service.RetrieveAllGroups()
+    groups = get_all_groups(group_service)
     for group in groups:
         print_group(group_service, group)
 
-def list_group(group_service, name):
-    group = group_service.RetrieveGroup(name)
+def list_group(group_service, group_email):
+    group = get_group(group_service, group_email)
     print_group(group_service, group)
 
-def print_members(group_service, group_id):
+def print_members(group_service, group_email):
     gid = ""
-    for user in group_service.RetrieveAllMembers(group_id): 
+    for user in get_group_members(group_service, group_email):
         print gid + "->", user['memberId']
-        gid = group_id + " "
+        gid = group_email + " "
 
 def print_memberships(address, groups):
     # Takes a string and a list of groups
@@ -42,9 +72,9 @@ def print_memberships(address, groups):
 
 def retrieve_list_memberships(group_service):
     users = defaultdict(list)
-    groups = group_service.RetrieveAllGroups()
+    groups = get_all_groups(group_service)
     for group in groups:
-        for user in group_service.RetrieveAllMembers(group["groupId"]): 
+        for user in get_group_members(group_service, group["groupId"]): 
             users[user["memberId"]].append(group["groupId"])
     return users
 
@@ -62,24 +92,24 @@ def print_list_memberships(group_service, users):
 
 def add_to_alias(group_service, alias, address):
     try:
-        group = group_service.RetrieveGroup(alias)
+        group = get_group(group_service, alias)
     except Exception, e:
         if e.reason == "EntityDoesNotExist":
             print "New Alias " + alias
             name = "Alias " + alias
-            group_service.CreateGroup(alias, name, "", "Anyone")
-            group = group_service.RetrieveGroup(alias)
+            create_group(group_service, alias, name, "", "Anyone")
+            group = get_group(group_service, alias)
         else:
             raise e
 
-    group_service.AddMemberToGroup(address, alias)
+    add_group_member(group_service, alias, address)
     print "Added"
     print "Current status of alias"
     print_group(group_service, group)    
     
 def delete_from_alias(group_service, alias, address):
     try:
-        group = group_service.RetrieveGroup(alias)
+        group = get_group(group_service, alias)
     except Exception, e:
         if e.reason == "EntityDoesNotExist":
             print "Invalid Alias " + alias
@@ -87,17 +117,17 @@ def delete_from_alias(group_service, alias, address):
             raise e
         return
     
-    if not group_service.IsMember(address, alias):
+    if not is_group_member(group_service, address, alias):
         print "*" * 70
         print "* " + address + " is not in " + alias
         print "*" * 70
     else:
-        group_service.RemoveMemberFromGroup(address, alias)
+        remove_group_member(group_service, address, alias)
         print "Deleted"
 
-    members = group_service.RetrieveAllMembers(alias)
+    members = get_group_members(group_service, alias)
     if not members:
-        group_service.DeleteGroup(alias)
+        remove_group(group_service, alias)
         print "Alias empty, removing alias"
     else:
         print "Current status of alias"
@@ -164,9 +194,8 @@ def main():
         password = options.password or login
 
 
+    group_service = get_group_service(username=options.email, domain=options.domain, password=options.password)
 
-    group_service = gdata.apps.groups.service.GroupsService(email=options.email, domain=options.domain, password=password) 
-    group_service.ProgrammaticLogin()
     
     # COMMANDS
     if command == "listall":
