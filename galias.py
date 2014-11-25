@@ -16,11 +16,11 @@ limitations under the License.
 """
 
 from collections import defaultdict
-import gdata.apps.groups.service
+from gdata.apps.groups import service
 
 def get_group_service(username, password, domain):
     """Construct a Service object and authenticate"""
-    group_service = gdata.apps.groups.service.GroupsService(email=username, domain=domain, password=password) 
+    group_service = service.GroupsService(email=username, domain=domain, password=password) 
     group_service.ProgrammaticLogin()
     return group_service
 
@@ -87,8 +87,6 @@ def print_list_memberships(group_service, users):
 
     for user in userlist:
         print_memberships(user, user_memberships[user])
-
-
 
 def add_to_alias(group_service, alias, address):
     try:
@@ -193,10 +191,8 @@ def main():
     else: 
         password = options.password or login
 
-
     group_service = get_group_service(username=options.email, domain=options.domain, password=options.password)
 
-    
     # COMMANDS
     if command == "listall":
         print_all_members(group_service)
