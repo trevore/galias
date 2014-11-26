@@ -17,6 +17,9 @@ limitations under the License.
 
 from collections import defaultdict
 from gdata.apps.groups import service
+# Used for Error Handling
+from gdata.apps.service import AppsForYourDomainException
+from xml.etree import ElementTree as etree
 
 def get_group_service(username, password, domain):
     """Construct a Service object and authenticate"""
@@ -194,25 +197,32 @@ def main():
     group_service = get_group_service(username=options.email, domain=options.domain, password=options.password)
 
     # COMMANDS
-    if command == "listall":
-        print_all_members(group_service)
-    elif command == "list":
-        print "listing alias", args[1]
-        list_group(group_service, args[1])
-    elif command == "list_memberships":
-        print "listing alias memberships"
-        if len(args) == 1:
-            print_list_memberships(group_service, [])
+    try:
+        
+        if command == "listall":
+            print_all_members(group_service)
+        elif command == "list":
+            print "listing alias", args[1]
+            list_group(group_service, args[1])
+        elif command == "list_memberships":
+            print "listing alias memberships"
+            if len(args) == 1:
+                print_list_memberships(group_service, [])
+            else:
+                print_list_memberships(group_service, args[1:])
+        elif command == "add":
+            print "%s add %s" % (args[1], args[2])
+            add_to_alias(group_service, args[1], args[2])
+        elif command == "delete":
+            print "%s delete %s" % (args[1], args[2])
+            delete_from_alias(group_service, args[1], args[2])
         else:
-            print_list_memberships(group_service, args[1:])
-    elif command == "add":
-        print "%s add %s" % (args[1], args[2])
-        add_to_alias(group_service, args[1], args[2])
-    elif command == "delete":
-        print "%s delete %s" % (args[1], args[2])
-        delete_from_alias(group_service, args[1], args[2])
-    else:
-        print "Unknown command"
+            print "Unknown command"
+    except AppsForYourDomainException as e:
+        # Errors are returned in XML.
+	    for xml_error in etree.fromstring(e.args[0]['body']):
+		    err=xml_error.attrib
+		    print 'ERROR: ({}) {}: {}'.format( err['errorCode'],err['reason'],err['invalidInput'])
 
 if __name__ == '__main__': 
     main()
