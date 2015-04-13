@@ -85,10 +85,10 @@ def is_group_member(group_service, email_address, group_email):
     return group_service.IsMember(email_address, group_email)
 
 
-def print_all_members(service):
-    groups = get_all_groups(service.groups())
+def print_all_members(service,domain):
+    groups = get_all_groups(service.groups(), domain)
     for group in groups:
-        print_group(service, group)
+        print_group(service.members(), group)
 
 def list_group(service, group_email):
     group = get_group(service.groups(), group_email)
@@ -96,9 +96,16 @@ def list_group(service, group_email):
 
 def print_members(service, group_email):
     gid = ""
-    for user in get_group_members(service, group_email):
-        print gid + "->", user['email']
-        gid = group_email + " "
+    members = get_group_members(service, group_email)
+    if members:
+        for user in members:
+            try:
+                print gid + "->", user['email']
+                gid = group_email + " "
+            except KeyError:
+                continue
+    else:
+        print gid + "-> Empty"
 
 def print_memberships(address, groups):
     # Takes a string and a list of groups
@@ -249,7 +256,7 @@ def main(argv):
     # COMMANDS
 
     if flags.command == "listall":
-        print_all_members(service)
+        print_all_members(service, config_domain)
     elif flags.command == "list":
         if not flags.args:
             argparser.print_help()
