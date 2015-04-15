@@ -16,18 +16,43 @@ limitations under the License.
 """
 
 from collections import defaultdict
-from apiclient.errors import HttpError
-from apiclient.http import BatchHttpRequest
-from apiclient.http import HttpMock
-from apiclient import sample_tools
-from oauth2client.client import AccessTokenRefreshError
+from optparse import OptionParser
+from optparse import OptionGroup
 import argparse
+import os.path
+import ConfigParser
+from apiclient.errors import HttpError
+from apiclient.discovery import build
+import httplib2
+from oauth2client.client import flow_from_clientsecrets
+from oauth2client.file import Storage
+from oauth2client import tools
+from oauth2client.tools import run_flow
+from oauth2client.client import AccessTokenRefreshError
 import sys
 import random
 from retrying import retry
-import os.path
 import pprint
 
+# CLIENT_SECRETS, name of a file containing the OAuth 2.0 information for this
+# application, including client_id and client_secret, which are found
+# on the API Access tab on the Google APIs
+# Console <http://code.google.com/apis/console>
+CLIENT_SECRETS = 'client_secrets.json'
+
+# Helpful message to display in the browser if the CLIENT_SECRETS file
+# is missing.
+MISSING_CLIENT_SECRETS_MESSAGE = """
+WARNING: Please configure OAuth 2.0
+
+To make this sample run you will need to populate the client_secrets.json file
+found at:
+
+   %s
+
+with information from the APIs Console <https://code.google.com/apis/console>.
+
+""" % os.path.join(os.path.dirname(__file__), CLIENT_SECRETS)
 
 def retry_if_http_error(exception):
     """Return True if we should retry  False otherwise"""
@@ -182,10 +207,6 @@ def print_group(member_service, group):
     print_members(member_service, gid)
 
 def main(argv):
-    from optparse import OptionParser
-    from optparse import OptionGroup
-    import os.path
-    import ConfigParser
     config_username = ""
     config_password = ""
     config_domain = ""
@@ -209,20 +230,21 @@ def main(argv):
     parser.add_option('-u', '--username', default=config_username)
     parser.add_option('-p', '--password', default=config_password)
     parser.add_option('-d', '--domain', default=config_domain)
+    parser.add_option('--auth_host_name', default='localhost',
+                      help='Hostname when running a local web server.')
+    parser.add_option('--noauth_local_webserver', action='store_true',
+                      default=False, help='Do not run a local web server.')
+    parser.add_option('--auth_host_port', default=[8080, 8090], type=int,
+                      nargs='*', help='Port web server should listen on.')
+    parser.add_option('--logging_level', default='ERROR',
+                      choices=['DEBUG', 'INFO', 'WARNING', 'ERROR',
+                               'CRITICAL'],
+                      help='Set the logging level of detail.')
     group = OptionGroup(parser, "Dangerous Options",
-                    "Caution: use these options at your own risk.  "
-                    "It is believed that some of them bite.")
+                        "Caution: use these options at your own risk.  "
+                        "It is believed that some of them bite.")
 
     options, args = parser.parse_args()
-    # addHelp=False here because it's added downstream in the sample_init
-    argparser = argparse.ArgumentParser(add_help=False)
-    argparser.add_argument(
-        'command',
-        choices=['listall', 'list'],
-        help='Action to be taken')
-    argparser.add_argument('args', nargs=argparse.REMAINDER)
-
-    command = ""
 
     if len(args) < 1:
         parser.error("incorrect number of arguments")
@@ -232,43 +254,44 @@ def main(argv):
     if not options.domain:
         options.domain = raw_input("Google apps domain name: ")
 
-    if not options.username:
-        username = raw_input("Your administrator username: ")
-        options.email = username + "@" + options.domain
-    else:
-        options.email = options.username + "@" + options.domain
-
-    if not options.password:
-        import getpass
-        password = getpass.getpass('Password: ')
-    else:
-        password = options.password or login
-
-    # Authenticate and construct service
+    # Set up a Flow object to be used if we need to authenticate.
     scope = ("https://www.googleapis.com/auth/admin.directory.group"
              " "
-             "https://www.googleapis.com/auth/admin.directory.group.member")
-    service, flags = sample_tools.init(
-        argv, 'admin', 'directory_v1', __doc__, __file__, parents=[argparser],
-        scope=scope
-        )
+             "https://www.googleapis.com/auth/admin.directory.group.member"
+             " "
+             "https://www.googleapis.com/auth/apps.groups.settings")
+    FLOW = flow_from_clientsecrets(CLIENT_SECRETS,
+                                   scope=scope,
+                                   message=MISSING_CLIENT_SECRETS_MESSAGE)
+    # Create an httplib2.Http object to handle our HTTP requests
+    http = httplib2.Http()
+    storage = Storage('credentials.dat')
+    credentials = storage.get()
+
+    if credentials is None or credentials.invalid:
+        print 'invalid credentials'
+        # Save the credentials in storage to be used in subsequent runs.
+        credentials = run_flow(FLOW, storage, flags=options, http=http)
+
+    # Authorize with our good Credentdials
+    http = credentials.authorize(http)
+
+    admin_service = build('admin', 'directory_v1', http=http)
+    group_settings_service = build('groupssettings', 'v1', http=http)
 
     # COMMANDS
 
-    if flags.command == "listall":
-        print_all_members(service, config_domain)
-    elif flags.command == "list":
-        if not flags.args:
-            argparser.print_help()
-            exit(1)
-        print "listing alias", flags.args[0]
-        list_group(service, flags.args[0])
+    if command == "listall":
+        print_all_members(admin_service, config_domain)
+    elif command == "list":
+        print "listing alias", args[1]
+        list_group(admin_service, args[1])
     elif command == "list_memberships":
         print "listing alias memberships"
         if len(args) == 1:
-            print_list_memberships(group_service, [])
+            print_list_memberships(admin_service, [])
         else:
-            print_list_memberships(group_service, args[1:])
+            print_list_memberships(admin_service, args[1:])
     elif command == "add":
         print "%s add %s" % (args[1], args[2])
         add_to_alias(group_service, args[1], args[2])
