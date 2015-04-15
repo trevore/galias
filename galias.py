@@ -153,8 +153,13 @@ def retrieve_list_memberships(admin_service, domain, userlist):
     if len(userlist) == 0:
         groups = get_all_groups(admin_service, domain)
         for group in groups:
-            for user in get_group_members(admin_service, group['email']):
-                users[user["email"]].append(group['email'])
+            members = get_group_members(admin_service, group['email'])
+            if members is not None:
+                for user in members:
+                    try:
+                        users[user["email"]].append(group['email'])
+                    except KeyError:
+                        continue
     else:
         for user in userlist:
             groups = get_all_groups(admin_service, domain, user)
