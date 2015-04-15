@@ -68,21 +68,26 @@ def execute_with_backoff(request):
     return response
 
 
-def get_all_groups(group_service, domain=None):
+def get_all_groups(admin_service, domain=None, user=None):
+    group_service = admin_service.groups()
     all_groups = []
-    request = group_service.list(domain=domain)
+    request = group_service.list(domain=domain, userKey=user)
     while (request is not None):
         response = execute_with_backoff(request)
         all_groups.extend(response['groups'])
         request = group_service.list_next(request, response)
     return all_groups
 
-def get_group(group_service, group_name):
+
+def get_group(admin_service, group_name):
+    group_service = admin_service.groups()
     request = group_service.get(groupKey=group_name)
     response = execute_with_backoff(request)
     return response
 
-def get_group_members(member_service, group_email):
+
+def get_group_members(admin_service, group_email):
+    member_service = admin_service.members()
     members = []
     request = member_service.list(groupKey=group_email)
     while (request is not None):
@@ -110,18 +115,20 @@ def is_group_member(group_service, email_address, group_email):
     return group_service.IsMember(email_address, group_email)
 
 
-def print_all_members(service,domain):
-    groups = get_all_groups(service.groups(), domain)
+def print_all_members(admin_service, domain):
+    groups = get_all_groups(admin_service, domain)
     for group in groups:
-        print_group(service.members(), group)
+        print_group(admin_service, group)
 
-def list_group(service, group_email):
-    group = get_group(service.groups(), group_email)
-    print_group(service.members(), group)
 
-def print_members(service, group_email):
+def list_group(admin_service, group_email):
+    group = get_group(admin_service, group_email)
+    print_group(admin_service, group)
+
+
+def print_members(admin_service, group_email):
     gid = ""
-    members = get_group_members(service, group_email)
+    members = get_group_members(admin_service, group_email)
     if members:
         for user in members:
             try:
@@ -132,6 +139,7 @@ def print_members(service, group_email):
     else:
         print gid + "-> Empty"
 
+
 def print_memberships(address, groups):
     # Takes a string and a list of groups
     print address + ":"
@@ -139,16 +147,24 @@ def print_memberships(address, groups):
         print "  " + group
     print
 
-def retrieve_list_memberships(group_service):
+
+def retrieve_list_memberships(admin_service, domain, userlist):
     users = defaultdict(list)
-    groups = get_all_groups(group_service)
-    for group in groups:
-        for user in get_group_members(group_service, group["groupId"]):
-            users[user["memberId"]].append(group["groupId"])
+    if len(userlist) == 0:
+        groups = get_all_groups(admin_service, domain)
+        for group in groups:
+            for user in get_group_members(admin_service, group['email']):
+                users[user["email"]].append(group['email'])
+    else:
+        for user in userlist:
+            groups = get_all_groups(admin_service, domain, user)
+            for group in groups:
+                users[user].append(group['email'])
     return users
 
-def print_list_memberships(group_service, users):
-    user_memberships = retrieve_list_memberships(group_service)
+
+def print_list_memberships(admin_service, domain, users):
+    user_memberships = retrieve_list_memberships(admin_service, domain, users)
     if len(users) == 0:
         userlist = sorted(user_memberships)
     else:
@@ -201,10 +217,10 @@ def delete_from_alias(group_service, alias, address):
         print_group(group_service, group)
 
 
-def print_group(member_service, group):
+def print_group(admin_service, group):
     gid = group['email']
     print('%s' % (gid)),
-    print_members(member_service, gid)
+    print_members(admin_service, gid)
 
 def main(argv):
     config_username = ""
@@ -289,9 +305,9 @@ def main(argv):
     elif command == "list_memberships":
         print "listing alias memberships"
         if len(args) == 1:
-            print_list_memberships(admin_service, [])
+            print_list_memberships(admin_service, config_domain, [])
         else:
-            print_list_memberships(admin_service, args[1:])
+            print_list_memberships(admin_service, config_domain, args[1:])
     elif command == "add":
         print "%s add %s" % (args[1], args[2])
         add_to_alias(group_service, args[1], args[2])
