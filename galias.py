@@ -19,6 +19,7 @@ from collections import defaultdict
 from optparse import OptionParser
 from optparse import OptionGroup
 import argparse
+import simplejson
 import os.path
 import ConfigParser
 from apiclient.errors import HttpError
@@ -99,14 +100,33 @@ def get_group_members(admin_service, group_email):
         request = member_service.list_next(request, response)
     return members
 
-def create_group(group_service, group_id, group_name, description, email_permission):
-    return group_service.CreateGroup(group_id, group_name, description, email_permission)
+
+def create_group(admin_service, group_settings_service, group_id, group_name,
+                 description, email_permission):
+    group_service = admin_service.groups()
+    body = {}
+    body['email'] = group_id
+    body['name'] = group_name
+    request = group_service.insert(body=body)
+    group = request.execute()
+    body = {}
+    body['whoCanPostMessage'] = 'ANYONE_CAN_POST'
+    settings_service = group_settings_service.groups()
+    request = settings_service.patch(groupUniqueId=group_id, body=body)
+    settings = request.execute()
+    return group
+
 
 def remove_group(group_service, group_email):
     return group_service.DeleteGroup(group_email)
 
-def add_group_member(group_service, group_email, email_address):
-    return group_service.AddMemberToGroup(email_address, group_email)
+
+def add_group_member(admin_service, group_email, email_address):
+    member_service = admin_service.members()
+    request = member_service.insert(groupKey=group_email,
+                                    body={'email': email_address})
+    response = request.execute()
+    return response
 
 def remove_group_member(group_service, email_address, group_email):
     return group_service.RemoveMemberFromGroup(email_address, group_email)
@@ -178,22 +198,55 @@ def print_list_memberships(admin_service, domain, users):
     for user in userlist:
         print_memberships(user, user_memberships[user])
 
-def add_to_alias(group_service, alias, address):
+
+def add_to_alias(admin_service, group_settings_service, alias, address):
     try:
-        group = get_group(group_service, alias)
-    except Exception, e:
-        if e.reason == "EntityDoesNotExist":
+        group_service = admin_service.groups()
+        request = group_service.get(groupKey=alias)
+        group = request.execute()
+    except HttpError, e:
+        try:
+            # Load Json body.
+            error = simplejson.loads(e.content).get('error')
+        except ValueError:
+            # Could not load Json body.
+            print 'HTTP Status code: %d' % e.resp.status
+            print 'HTTP Reason: %s' % e.resp.reason
+            raise(e)
+        reason = error['errors'][0]['reason']
+        if error['code'] == 404 and reason == 'notFound':
             print "New Alias " + alias
             name = "Alias " + alias
-            create_group(group_service, alias, name, "", "Anyone")
-            group = get_group(group_service, alias)
+            group = create_group(admin_service, group_settings_service, alias,
+                                 name, "", "Anyone")
         else:
+            print 'Error code: %d' % error.get('code')
+            print 'Error message: %s' % error.get('message')
+            raise e
+    try:
+        add_group_member(admin_service, alias, address)
+        print "Added"
+    except HttpError, e:
+        try:
+            # Load Json body.
+            error = simplejson.loads(e.content).get('error')
+        except ValueError:
+            # Could not load Json body.
+            print 'HTTP Status code: %d' % e.resp.status
+            print 'HTTP Reason: %s' % e.resp.reason
+            raise(e)
+        reason = error['errors'][0]['reason']
+        if error['code'] == 409 and == reason = 'duplicate':
+            print '%s is already a member of %s' % (address, alias)
+        else:
+            print 'Error code: %d' % error.get('code')
+            print 'Error message: %s' % error.get('message')
+            print 'Error reason: %s' % error['errors'][0]['reason']
             raise e
 
-    add_group_member(group_service, alias, address)
-    print "Added"
     print "Current status of alias"
-    print_group(group_service, group)
+    print_group(admin_service, group)
+
 
 def delete_from_alias(group_service, alias, address):
     try:
@@ -226,6 +279,7 @@ def print_group(admin_service, group):
     gid = group['email']
     print('%s' % (gid)),
     print_members(admin_service, gid)
+
 
 def main(argv):
     config_username = ""
@@ -315,7 +369,7 @@ def main(argv):
             print_list_memberships(admin_service, config_domain, args[1:])
     elif command == "add":
         print "%s add %s" % (args[1], args[2])
-        add_to_alias(group_service, args[1], args[2])
+        add_to_alias(admin_service, group_settings_service, args[1], args[2])
     elif command == "delete":
         print "%s delete %s" % (args[1], args[2])
         delete_from_alias(group_service, args[1], args[2])
