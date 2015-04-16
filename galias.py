@@ -331,14 +331,10 @@ def print_group(admin_service, group):
 
 
 def main(argv):
-    config_username = ""
-    config_password = ""
     config_domain = ""
     if os.path.isfile("galias.ini"):
         Config = ConfigParser.ConfigParser()
         Config.read("galias.ini")
-        config_username = Config.get("galias", "username")
-        config_password = Config.get("galias", "password")
         config_domain = Config.get("galias", "domain")
 
     usage = "usage: %prog [options] COMMAND \n\
@@ -351,8 +347,6 @@ def main(argv):
         "
     parser = OptionParser(usage)
 
-    parser.add_option('-u', '--username', default=config_username)
-    parser.add_option('-p', '--password', default=config_password)
     parser.add_option('-d', '--domain', default=config_domain)
     parser.add_option('--auth_host_name', default='localhost',
                       help='Hostname when running a local web server.')
