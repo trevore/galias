@@ -60,10 +60,10 @@ def retry_if_http_error(exception):
     return isinstance(exception, HttpError)
 
 # Implement backoff in case of API rate errors
-@retry(wait_exponential_multiplier=1000,
-       wait_exponential_max=10000,
-       retry_on_exception=retry_if_http_error,
-       wrap_exception=False)
+# @retry(wait_exponential_multiplier=1000,
+#        wait_exponential_max=10000,
+#        retry_on_exception=retry_if_http_error,
+#        wrap_exception=False)
 def execute_with_backoff(request):
     response = request.execute()
     return response
@@ -117,8 +117,11 @@ def create_group(admin_service, group_settings_service, group_id, group_name,
     return group
 
 
-def remove_group(group_service, group_email):
-    return group_service.DeleteGroup(group_email)
+def remove_group(admin_service, groupUniqueId):
+    group_service = admin_service.groups()
+    request = group_service.delete(groupKey=groupUniqueId)
+    response = request.execute()
+    return response
 
 
 def add_group_member(admin_service, group_email, email_address):
@@ -128,11 +131,39 @@ def add_group_member(admin_service, group_email, email_address):
     response = request.execute()
     return response
 
-def remove_group_member(group_service, email_address, group_email):
-    return group_service.RemoveMemberFromGroup(email_address, group_email)
 
-def is_group_member(group_service, email_address, group_email):
-    return group_service.IsMember(email_address, group_email)
+def remove_group_member(admin_service, email_address, group_email):
+    member_service = admin_service.members()
+    request = member_service.delete(groupKey=group_email,
+                                    memberKey=email_address)
+    response = request.execute()
+    return response
+
+
+def is_group_member(admin_service, email_address, group_email):
+    try:
+        member_service = admin_service.members()
+        request = member_service.get(groupKey=group_email,
+                                     memberKey=email_address)
+        response = request.execute()
+        return True
+    except HttpError, e:
+        try:
+            # Load Json body.
+            error = simplejson.loads(e.content).get('error')
+        except ValueError:
+            # Could not load Json body.
+            print 'HTTP Status code: %d' % e.resp.status
+            print 'HTTP Reason: %s' % e.resp.reason
+            raise(e)
+        reason = error['errors'][0]['reason']
+        if error['code'] == 404 and reason == 'notFound':
+            return False
+        else:
+            print 'Error code: %d' % error.get('code')
+            print 'Error message: %s' % error.get('message')
+            raise e
+    return True
 
 
 def print_all_members(admin_service, domain):
@@ -236,7 +267,7 @@ def add_to_alias(admin_service, group_settings_service, alias, address):
             print 'HTTP Reason: %s' % e.resp.reason
             raise(e)
         reason = error['errors'][0]['reason']
-        if error['code'] == 409 and == reason = 'duplicate':
+        if error['code'] == 409 and reason == 'duplicate':
             print '%s is already a member of %s' % (address, alias)
         else:
             print 'Error code: %d' % error.get('code')
@@ -248,31 +279,49 @@ def add_to_alias(admin_service, group_settings_service, alias, address):
     print_group(admin_service, group)
 
 
-def delete_from_alias(group_service, alias, address):
+def delete_from_alias(admin_service, alias, address):
     try:
-        group = get_group(group_service, alias)
-    except Exception, e:
-        if e.reason == "EntityDoesNotExist":
-            print "Invalid Alias " + alias
+        group_service = admin_service.groups()
+        request = group_service.get(groupKey=alias)
+        group = request.execute()
+    except HttpError, e:
+        try:
+            # Load Json body.
+            error = simplejson.loads(e.content).get('error')
+        except ValueError:
+            # Could not load Json body.
+            print 'HTTP Status code: %d' % e.resp.status
+            print 'HTTP Reason: %s' % e.resp.reason
+            raise(e)
+        reason = error['errors'][0]['reason']
+        if error['code'] == 404 and reason == 'notFound':
+            print 'Error: alias %s does not exist' % alias
+            exit(1)
         else:
+            print 'Error code: %d' % error.get('code')
+            print 'Error message: %s' % error.get('message')
             raise e
-        return
 
-    if not is_group_member(group_service, address, alias):
+    if not is_group_member(admin_service, address, alias):
         print "*" * 70
         print "* " + address + " is not in " + alias
         print "*" * 70
     else:
-        remove_group_member(group_service, address, alias)
-        print "Deleted"
+        response = remove_group_member(admin_service, address, alias)
+        if not response:
+            print "Deleted"
+        else:
+            print "Error: There was a problem removing the group member"
 
-    members = get_group_members(group_service, alias)
+    members = get_group_members(admin_service, alias)
     if not members:
-        remove_group(group_service, alias)
-        print "Alias empty, removing alias"
+        if not remove_group(admin_service, group['id']):
+            print "Alias empty, removing alias"
+        else:
+            print "Error removing alias"
     else:
         print "Current status of alias"
-        print_group(group_service, group)
+        print_group(admin_service, group)
 
 
 def print_group(admin_service, group):
@@ -372,7 +421,7 @@ def main(argv):
         add_to_alias(admin_service, group_settings_service, args[1], args[2])
     elif command == "delete":
         print "%s delete %s" % (args[1], args[2])
-        delete_from_alias(group_service, args[1], args[2])
+        delete_from_alias(admin_service, args[1], args[2])
     else:
         print "Unknown command"
 
