@@ -4,31 +4,34 @@ galias
 Command line tool to create google groups as mail aliases for google apps
 
 
-## Requires gdata
-`sudo pip install -U gdata`
+## Requires the google python API client
+`sudo pip install -U google-api-python-client`
+
+## Requires the retrying package
+`sudo pip install -U retrying`
 
 ## Usage
 
-Usage: `galias.py [options] COMMAND` 
-        
+Usage: `galias.py [options] COMMAND`
+
 Possible COMMANDS are:
 
 * `listall` - List all aliases
-* `list <alias>` - list the specified alias         
+* `list <alias>` - list the specified alias
 * `list_memberships [addresses]` - list alias memberships for an optional list of addresses
-* `add <alias> <destination>` - add the `<destination>` to the `<alias>`         
-* `delete <alias> <destination>` - delete the `<destination>` from the `<alias>`         
+* `add <alias> <destination>` - add the `<destination>` to the `<alias>`
+* `delete <alias> <destination>` - delete the `<destination>` from the `<alias>`
 
 
 Options:
 
   * `-h, --help`	show this help message and exit
-  * `-u USERNAME`, 	`--username=USERNAME`
-  * `-p PASSWORD`, 	`--password=PASSWORD`
   * `-d DOMAIN`, 	`--domain=DOMAIN`
-  
+
 ## Config
-Three pieces of informaiton are required, username, password and domain. If they are not given the program will prompt them. For faster use you can pass them on the command line with the above options or copy `example_galias.ini` to `galias.ini` and edit it with your information.
+The domain to administer is required. If it is not given, the program will prompt for it. For faster use you can pass it on the command line with the above option or copy `example_galias.ini` to `galias.ini` and edit it with your information.
+
+In addition, the script must be registered in the Google Developer console for your domain, and the client_secrets.json file must be present.
 
 ## Examples
 #### List all aliases
@@ -42,4 +45,3 @@ Three pieces of informaiton are required, username, password and domain. If they
 
 #### Delete other@email.com from the name@domain.com alias
 `./galias.py delete name@domain.com other@gmail.com`
-

@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 """
-Copyright 2014 Trevor Ellermann                                                                                                                                         
+Copyright 2014 Trevor Ellermann
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,73 +16,211 @@ limitations under the License.
 """
 
 from collections import defaultdict
-from gdata.apps.groups import service
-# Used for Error Handling
-from gdata.apps.service import AppsForYourDomainException
-from xml.etree import ElementTree as etree
+from optparse import OptionParser
+from optparse import OptionGroup
+import argparse
+import simplejson
+import os.path
+import ConfigParser
+from apiclient.errors import HttpError
+from apiclient.discovery import build
+import httplib2
+from oauth2client.client import flow_from_clientsecrets
+from oauth2client.file import Storage
+from oauth2client import tools
+from oauth2client.tools import run_flow
+from oauth2client.client import AccessTokenRefreshError
+import sys
+import random
+from retrying import retry
+import pprint
 
-def get_group_service(username, password, domain):
-    """Construct a Service object and authenticate"""
-    group_service = service.GroupsService(email=username, domain=domain, password=password) 
-    group_service.ProgrammaticLogin()
-    return group_service
+# CLIENT_SECRETS, name of a file containing the OAuth 2.0 information for this
+# application, including client_id and client_secret, which are found
+# on the API Access tab on the Google APIs
+# Console <http://code.google.com/apis/console>
+CLIENT_SECRETS = 'client_secrets.json'
 
-def get_all_groups(group_service):
-    return group_service.RetrieveAllGroups()
+# Helpful message to display in the browser if the CLIENT_SECRETS file
+# is missing.
+MISSING_CLIENT_SECRETS_MESSAGE = """
+WARNING: Please configure OAuth 2.0
 
-def get_group(group_service, group_name):
-    return group_service.RetrieveGroup(group_name)
+To make this sample run you will need to populate the client_secrets.json file
+found at:
 
-def get_group_members(group_service, group_email):
-    return group_service.RetrieveAllMembers(group_email)
+   %s
 
-def create_group(group_service, group_id, group_name, description, email_permission):
-    return group_service.CreateGroup(group_id, group_name, description, email_permission)
+with information from the APIs Console <https://code.google.com/apis/console>.
 
-def remove_group(group_service, group_email):
-    return group_service.DeleteGroup(group_email)
+""" % os.path.join(os.path.dirname(__file__), CLIENT_SECRETS)
 
-def add_group_member(group_service, group_email, email_address):
-    return group_service.AddMemberToGroup(email_address, group_email)
+def retry_if_http_error(exception):
+    """Return True if we should retry  False otherwise"""
+    return isinstance(exception, HttpError)
 
-def remove_group_member(group_service, email_address, group_email):
-    return group_service.RemoveMemberFromGroup(email_address, group_email)
+# Implement backoff in case of API rate errors
+# @retry(wait_exponential_multiplier=1000,
+#        wait_exponential_max=10000,
+#        retry_on_exception=retry_if_http_error,
+#        wrap_exception=False)
+def execute_with_backoff(request):
+    response = request.execute()
+    return response
 
-def is_group_member(group_service, email_address, group_email):
-    return group_service.IsMember(email_address, group_email)
 
-def print_all_members(group_service):
-    groups = get_all_groups(group_service)
+def get_all_groups(admin_service, domain=None, user=None):
+    group_service = admin_service.groups()
+    all_groups = []
+    request = group_service.list(domain=domain, userKey=user)
+    while (request is not None):
+        response = execute_with_backoff(request)
+        all_groups.extend(response['groups'])
+        request = group_service.list_next(request, response)
+    return all_groups
+
+
+def get_group(admin_service, group_name):
+    group_service = admin_service.groups()
+    request = group_service.get(groupKey=group_name)
+    response = execute_with_backoff(request)
+    return response
+
+
+def get_group_members(admin_service, group_email):
+    member_service = admin_service.members()
+    members = []
+    request = member_service.list(groupKey=group_email)
+    while (request is not None):
+        response = execute_with_backoff(request)
+        try:
+            members.extend(response['members'])
+        except KeyError:
+            return None
+        request = member_service.list_next(request, response)
+    return members
+
+
+def create_group(admin_service, group_settings_service, group_id, group_name,
+                 description, email_permission):
+    group_service = admin_service.groups()
+    body = {}
+    body['email'] = group_id
+    body['name'] = group_name
+    request = group_service.insert(body=body)
+    group = request.execute()
+    body = {}
+    body['whoCanPostMessage'] = 'ANYONE_CAN_POST'
+    settings_service = group_settings_service.groups()
+    request = settings_service.patch(groupUniqueId=group_id, body=body)
+    settings = request.execute()
+    return group
+
+
+def remove_group(admin_service, groupUniqueId):
+    group_service = admin_service.groups()
+    request = group_service.delete(groupKey=groupUniqueId)
+    response = request.execute()
+    return response
+
+
+def add_group_member(admin_service, group_email, email_address):
+    member_service = admin_service.members()
+    request = member_service.insert(groupKey=group_email,
+                                    body={'email': email_address})
+    response = request.execute()
+    return response
+
+
+def remove_group_member(admin_service, email_address, group_email):
+    member_service = admin_service.members()
+    request = member_service.delete(groupKey=group_email,
+                                    memberKey=email_address)
+    response = request.execute()
+    return response
+
+
+def is_group_member(admin_service, email_address, group_email):
+    try:
+        member_service = admin_service.members()
+        request = member_service.get(groupKey=group_email,
+                                     memberKey=email_address)
+        response = request.execute()
+        return True
+    except HttpError, e:
+        try:
+            # Load Json body.
+            error = simplejson.loads(e.content).get('error')
+        except ValueError:
+            # Could not load Json body.
+            print 'HTTP Status code: %d' % e.resp.status
+            print 'HTTP Reason: %s' % e.resp.reason
+            raise(e)
+        reason = error['errors'][0]['reason']
+        if error['code'] == 404 and reason == 'notFound':
+            return False
+        else:
+            print 'Error code: %d' % error.get('code')
+            print 'Error message: %s' % error.get('message')
+            raise e
+    return True
+
+
+def print_all_members(admin_service, domain):
+    groups = get_all_groups(admin_service, domain)
     for group in groups:
-        print_group(group_service, group)
+        print_group(admin_service, group)
 
-def list_group(group_service, group_email):
-    group = get_group(group_service, group_email)
-    print_group(group_service, group)
 
-def print_members(group_service, group_email):
+def list_group(admin_service, group_email):
+    group = get_group(admin_service, group_email)
+    print_group(admin_service, group)
+
+
+def print_members(admin_service, group_email):
     gid = ""
-    for user in get_group_members(group_service, group_email):
-        print gid + "->", user['memberId']
-        gid = group_email + " "
+    members = get_group_members(admin_service, group_email)
+    if members:
+        for user in members:
+            try:
+                print gid + "->", user['email']
+                gid = group_email + " "
+            except KeyError:
+                continue
+    else:
+        print gid + "-> Empty"
+
 
 def print_memberships(address, groups):
     # Takes a string and a list of groups
     print address + ":"
-    for group in groups: 
+    for group in groups:
         print "  " + group
     print
 
-def retrieve_list_memberships(group_service):
+
+def retrieve_list_memberships(admin_service, domain, userlist):
     users = defaultdict(list)
-    groups = get_all_groups(group_service)
-    for group in groups:
-        for user in get_group_members(group_service, group["groupId"]): 
-            users[user["memberId"]].append(group["groupId"])
+    if len(userlist) == 0:
+        groups = get_all_groups(admin_service, domain)
+        for group in groups:
+            members = get_group_members(admin_service, group['email'])
+            if members is not None:
+                for user in members:
+                    try:
+                        users[user["email"]].append(group['email'])
+                    except KeyError:
+                        continue
+    else:
+        for user in userlist:
+            groups = get_all_groups(admin_service, domain, user)
+            for group in groups:
+                users[user].append(group['email'])
     return users
 
-def print_list_memberships(group_service, users):
-    user_memberships = retrieve_list_memberships(group_service)
+
+def print_list_memberships(admin_service, domain, users):
+    user_memberships = retrieve_list_memberships(admin_service, domain, users)
     if len(users) == 0:
         userlist = sorted(user_memberships)
     else:
@@ -91,69 +229,114 @@ def print_list_memberships(group_service, users):
     for user in userlist:
         print_memberships(user, user_memberships[user])
 
-def add_to_alias(group_service, alias, address):
+
+def add_to_alias(admin_service, group_settings_service, alias, address):
     try:
-        group = get_group(group_service, alias)
-    except Exception, e:
-        if e.reason == "EntityDoesNotExist":
+        group_service = admin_service.groups()
+        request = group_service.get(groupKey=alias)
+        group = request.execute()
+    except HttpError, e:
+        try:
+            # Load Json body.
+            error = simplejson.loads(e.content).get('error')
+        except ValueError:
+            # Could not load Json body.
+            print 'HTTP Status code: %d' % e.resp.status
+            print 'HTTP Reason: %s' % e.resp.reason
+            raise(e)
+        reason = error['errors'][0]['reason']
+        if error['code'] == 404 and reason == 'notFound':
             print "New Alias " + alias
             name = "Alias " + alias
-            create_group(group_service, alias, name, "", "Anyone")
-            group = get_group(group_service, alias)
+            group = create_group(admin_service, group_settings_service, alias,
+                                 name, "", "Anyone")
         else:
+            print 'Error code: %d' % error.get('code')
+            print 'Error message: %s' % error.get('message')
+            raise e
+    try:
+        add_group_member(admin_service, alias, address)
+        print "Added"
+    except HttpError, e:
+        try:
+            # Load Json body.
+            error = simplejson.loads(e.content).get('error')
+        except ValueError:
+            # Could not load Json body.
+            print 'HTTP Status code: %d' % e.resp.status
+            print 'HTTP Reason: %s' % e.resp.reason
+            raise(e)
+        reason = error['errors'][0]['reason']
+        if error['code'] == 409 and reason == 'duplicate':
+            print '%s is already a member of %s' % (address, alias)
+        else:
+            print 'Error code: %d' % error.get('code')
+            print 'Error message: %s' % error.get('message')
+            print 'Error reason: %s' % error['errors'][0]['reason']
             raise e
 
-    add_group_member(group_service, alias, address)
-    print "Added"
     print "Current status of alias"
-    print_group(group_service, group)    
-    
-def delete_from_alias(group_service, alias, address):
+    print_group(admin_service, group)
+
+
+def delete_from_alias(admin_service, alias, address):
     try:
-        group = get_group(group_service, alias)
-    except Exception, e:
-        if e.reason == "EntityDoesNotExist":
-            print "Invalid Alias " + alias
+        group_service = admin_service.groups()
+        request = group_service.get(groupKey=alias)
+        group = request.execute()
+    except HttpError, e:
+        try:
+            # Load Json body.
+            error = simplejson.loads(e.content).get('error')
+        except ValueError:
+            # Could not load Json body.
+            print 'HTTP Status code: %d' % e.resp.status
+            print 'HTTP Reason: %s' % e.resp.reason
+            raise(e)
+        reason = error['errors'][0]['reason']
+        if error['code'] == 404 and reason == 'notFound':
+            print 'Error: alias %s does not exist' % alias
+            exit(1)
         else:
+            print 'Error code: %d' % error.get('code')
+            print 'Error message: %s' % error.get('message')
             raise e
-        return
-    
-    if not is_group_member(group_service, address, alias):
+
+    if not is_group_member(admin_service, address, alias):
         print "*" * 70
         print "* " + address + " is not in " + alias
         print "*" * 70
     else:
-        remove_group_member(group_service, address, alias)
-        print "Deleted"
+        response = remove_group_member(admin_service, address, alias)
+        if not response:
+            print "Deleted"
+        else:
+            print "Error: There was a problem removing the group member"
 
-    members = get_group_members(group_service, alias)
+    members = get_group_members(admin_service, alias)
     if not members:
-        remove_group(group_service, alias)
-        print "Alias empty, removing alias"
+        if not remove_group(admin_service, group['id']):
+            print "Alias empty, removing alias"
+        else:
+            print "Error removing alias"
     else:
         print "Current status of alias"
-        print_group(group_service, group)
-    
-def print_group(group_service, group): 
-    gid = group['groupId'] 
-    print('%s' % (gid)), 
-    print_members(group_service, gid) 
+        print_group(admin_service, group)
 
-def main():
-    from optparse import OptionParser
-    from optparse import OptionGroup
-    import os.path
-    import ConfigParser
-    config_username = ""
-    config_password = ""
+
+def print_group(admin_service, group):
+    gid = group['email']
+    print('%s' % (gid)),
+    print_members(admin_service, gid)
+
+
+def main(argv):
     config_domain = ""
     if os.path.isfile("galias.ini"):
         Config = ConfigParser.ConfigParser()
         Config.read("galias.ini")
-        config_username = Config.get("galias", "username")
-        config_password = Config.get("galias", "password")
         config_domain = Config.get("galias", "domain")
-    
+
     usage = "usage: %prog [options] COMMAND \n\
         \nPossible COMANDS are: \
         \n    listall - List all aliases \
@@ -164,15 +347,22 @@ def main():
         "
     parser = OptionParser(usage)
 
-    parser.add_option('-u', '--username', default=config_username)
-    parser.add_option('-p', '--password', default=config_password)
     parser.add_option('-d', '--domain', default=config_domain)
+    parser.add_option('--auth_host_name', default='localhost',
+                      help='Hostname when running a local web server.')
+    parser.add_option('--noauth_local_webserver', action='store_true',
+                      default=False, help='Do not run a local web server.')
+    parser.add_option('--auth_host_port', default=[8080, 8090], type=int,
+                      nargs='*', help='Port web server should listen on.')
+    parser.add_option('--logging_level', default='ERROR',
+                      choices=['DEBUG', 'INFO', 'WARNING', 'ERROR',
+                               'CRITICAL'],
+                      help='Set the logging level of detail.')
     group = OptionGroup(parser, "Dangerous Options",
-                    "Caution: use these options at your own risk.  "
-                    "It is believed that some of them bite.")
+                        "Caution: use these options at your own risk.  "
+                        "It is believed that some of them bite.")
 
     options, args = parser.parse_args()
-    command = ""
 
     if len(args) < 1:
         parser.error("incorrect number of arguments")
@@ -181,48 +371,54 @@ def main():
 
     if not options.domain:
         options.domain = raw_input("Google apps domain name: ")
-        
-    if not options.username:
-        username = raw_input("Your administrator username: ")
-        options.email = username + "@" + options.domain
-    else:
-        options.email = options.username + "@" + options.domain
 
-    if not options.password:       
-        import getpass 
-        password = getpass.getpass('Password: ')
-    else: 
-        password = options.password or login
+    # Set up a Flow object to be used if we need to authenticate.
+    scope = ("https://www.googleapis.com/auth/admin.directory.group"
+             " "
+             "https://www.googleapis.com/auth/admin.directory.group.member"
+             " "
+             "https://www.googleapis.com/auth/apps.groups.settings")
+    FLOW = flow_from_clientsecrets(CLIENT_SECRETS,
+                                   scope=scope,
+                                   message=MISSING_CLIENT_SECRETS_MESSAGE)
+    # Create an httplib2.Http object to handle our HTTP requests
+    http = httplib2.Http()
+    storage = Storage('credentials.dat')
+    credentials = storage.get()
 
-    group_service = get_group_service(username=options.email, domain=options.domain, password=options.password)
+    if credentials is None or credentials.invalid:
+        print 'invalid credentials'
+        # Save the credentials in storage to be used in subsequent runs.
+        credentials = run_flow(FLOW, storage, flags=options, http=http)
+
+    # Authorize with our good Credentdials
+    http = credentials.authorize(http)
+
+    admin_service = build('admin', 'directory_v1', http=http)
+    group_settings_service = build('groupssettings', 'v1', http=http)
 
     # COMMANDS
-    try:
-        
-        if command == "listall":
-            print_all_members(group_service)
-        elif command == "list":
-            print "listing alias", args[1]
-            list_group(group_service, args[1])
-        elif command == "list_memberships":
-            print "listing alias memberships"
-            if len(args) == 1:
-                print_list_memberships(group_service, [])
-            else:
-                print_list_memberships(group_service, args[1:])
-        elif command == "add":
-            print "%s add %s" % (args[1], args[2])
-            add_to_alias(group_service, args[1], args[2])
-        elif command == "delete":
-            print "%s delete %s" % (args[1], args[2])
-            delete_from_alias(group_service, args[1], args[2])
-        else:
-            print "Unknown command"
-    except AppsForYourDomainException as e:
-        # Errors are returned in XML.
-	    for xml_error in etree.fromstring(e.args[0]['body']):
-		    err=xml_error.attrib
-		    print 'ERROR: ({}) {}: {}'.format( err['errorCode'],err['reason'],err['invalidInput'])
 
-if __name__ == '__main__': 
-    main()
+    if command == "listall":
+        print_all_members(admin_service, config_domain)
+    elif command == "list":
+        print "listing alias", args[1]
+        list_group(admin_service, args[1])
+    elif command == "list_memberships":
+        print "listing alias memberships"
+        if len(args) == 1:
+            print_list_memberships(admin_service, config_domain, [])
+        else:
+            print_list_memberships(admin_service, config_domain, args[1:])
+    elif command == "add":
+        print "%s add %s" % (args[1], args[2])
+        add_to_alias(admin_service, group_settings_service, args[1], args[2])
+    elif command == "delete":
+        print "%s delete %s" % (args[1], args[2])
+        delete_from_alias(admin_service, args[1], args[2])
+    else:
+        print "Unknown command"
+
+
+if __name__ == '__main__':
+    main(sys.argv)
