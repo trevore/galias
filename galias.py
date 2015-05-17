@@ -57,7 +57,7 @@ with information from the APIs Console <https://code.google.com/apis/console>.
 """ % os.path.join(os.path.dirname(__file__), CLIENT_SECRETS)
 
 # List of valid group types
-VALID_GROUP_TYPES = ["alias", "announce", "discussion"]
+VALID_GROUP_TYPES = ["alias", "announce", "discuss"]
 
 # API Reference for settings at
 # https://developers.google.com/admin-sdk/groups-settings/v1/reference/groups
@@ -79,13 +79,13 @@ aliasSettings['spamModerationLevel'] = 'ALLOW'
 aliasSettings['showInGroupDirectory'] = 'false'
 aliasSettings['isArchived'] = 'false'
 
-# Discussion specific settings
-discussionSettings = globalSettings
-discussionSettings['whoCanPostMessage'] = 'ALL_MEMBERS_CAN_POST'
-discussionSettings['messageModerationLevel'] = 'MODERATE_NONE'
-discussionSettings['spamModerationLevel'] = 'MODERATE'
-discussionSettings['showInGroupDirectory'] = 'true'
-discussionSettings['isArchived'] = 'true'
+# Discuss specific settings
+discussSettings = globalSettings
+discussSettings['whoCanPostMessage'] = 'ALL_MEMBERS_CAN_POST'
+discussSettings['messageModerationLevel'] = 'MODERATE_NONE'
+discussSettings['spamModerationLevel'] = 'MODERATE'
+discussSettings['showInGroupDirectory'] = 'true'
+discussSettings['isArchived'] = 'true'
 
 # Announce specific settings
 announceSettings = globalSettings
@@ -108,15 +108,14 @@ def execute_with_backoff(request):
     try:
         response = request.execute()
     except HttpError, e:
-        print 'Error Status code: %d' % e.resp.status
-        print 'Error Reason: %s' % e.resp.reason
+        print 'Error: %d (%s) - %s' % (e.resp.status, e.resp.reason, e._get_reason())
         sys.exit()
     return response
 
 
 def query_group_type():
     valid = {"l": "alias", "L": "alias", "Alias": "alias", "alias": "alias",
-             "d": "discussion", "D": "discussion", "Discussion": "discussion", "discussion": "discussion",
+             "d": "discuss", "D": "discuss", "Discuss": "discuss", "discuss": "discuss",
              "n": "announce", "N": "announce", "Announce": "announce", "announce": "announce"}
 
     prompt = " [L/D/N] "
@@ -127,7 +126,7 @@ def query_group_type():
         if choice in valid:
             return valid[choice]
         else:
-            sys.stdout.write("Please respond with 'alias' or 'announce' or 'discussion' "
+            sys.stdout.write("Please respond with 'alias' or 'announce' or 'discuss' "
                              "(or 'L' or 'N' or 'D').\n")
 
 
@@ -214,8 +213,8 @@ def create_group(admin_service, group_settings_service, group_id, group_type=Non
         settings = aliasSettings
     elif group_type == "announce":
         settings = announceSettings
-    elif group_type == "discussion":
-        settings = discussionSettings
+    elif group_type == "discuss":
+        settings = discussSettings
     else:
         print "Invalid group type: \"" + group_type + "\""
         sys.exit()
@@ -226,23 +225,18 @@ def create_group(admin_service, group_settings_service, group_id, group_type=Non
     body['name'] = group_id.split("@", 1)[0].title() + " " + group_type.title()
 
     request = group_service.insert(body=body)
-    group = request.execute()
+    group = execute_with_backoff(request)   
     time.sleep(1)
     settings_service = group_settings_service.groups()
     request = settings_service.patch(groupUniqueId=group_id, body=settings)
-    settings = request.execute()
+    settings = execute_with_backoff(request)
     return group
 
 
 def remove_group(admin_service, groupUniqueId):
     group_service = admin_service.groups()
     request = group_service.delete(groupKey=groupUniqueId)
-    try:
-        response = request.execute()
-    except HttpError, e:
-        print 'Error Status code: %d' % e.resp.status
-        print 'Error Reason: %s' % e.resp.reason
-        sys.exit()    
+    response = execute_with_backoff(request)
     return response
 
 
@@ -252,7 +246,7 @@ def add_group_member(admin_service, group_email, email_address, owner):
     if owner:
         myRole = "OWNER"
     request = member_service.insert(groupKey=group_email, body={'email': email_address, 'role': myRole})
-    response = request.execute()
+    response = execute_with_backoff(request)
     return response
 
 
@@ -260,7 +254,7 @@ def remove_group_member(admin_service, email_address, group_email):
     member_service = admin_service.members()
     request = member_service.delete(groupKey=group_email,
                                     memberKey=email_address)
-    response = request.execute()
+    response = execute_with_backoff(request)
     return response
 
 
@@ -269,7 +263,7 @@ def is_group_member(admin_service, email_address, group_email):
         member_service = admin_service.members()
         request = member_service.get(groupKey=group_email,
                                      memberKey=email_address)
-        response = request.execute()
+        response = execute_with_backoff(request)
         return True
     except HttpError, e:
         try:
@@ -358,7 +352,7 @@ def add_to_group(admin_service, group_settings_service, groupid, address, owner=
     try:
         group_service = admin_service.groups()
         request = group_service.get(groupKey=groupid)
-        group = request.execute()
+        group = execute_with_backoff(request)
     except HttpError, e:
         try:
             # Load Json body.
@@ -405,7 +399,7 @@ def delete_from_group(admin_service, groupid, address):
     try:
         group_service = admin_service.groups()
         request = group_service.get(groupKey=groupid)
-        group = request.execute()
+        group = execute_with_backoff(request)
     except HttpError, e:
         try:
             # Load Json body.
@@ -484,7 +478,7 @@ def main(argv):
         \n    add <group> <destination> <owner> - add the <destination> to the <group> optionally you can specify owner \
         \n    promote <group> <destination> - promote <destination> to an owner of <group> \
         \n    demote <group> <destination> - demote <destination> to member of <group> \
-        \n    create <group> <type> - create <group> where <type> can be [alias, announce, discussion] \
+        \n    create <group> <type> - create <group> where <type> can be [alias, announce, discuss] \
         \n    delete <group> <destination> - delete the <destination> from the <group> \
         \n    groupdelete <group> - delete whole <group> WITHOUT CONFIRMATION \
         \n    getsettings <group> - output the settings for <group> \
@@ -583,8 +577,11 @@ def main(argv):
         delete_from_group(admin_service, args[1], args[2])
         add_to_group(admin_service, group_settings_service, args[1], args[2], False)
     elif command == "delete":
-        print "%s delete %s" % (args[1], args[2])
-        delete_from_group(admin_service, args[1], args[2])
+        if len(args) < 3:
+            print "ERROR: Missing <destination>. Use groupdelete to delete the whole group."
+        else :
+            print "%s delete %s" % (args[1], args[2])
+            delete_from_group(admin_service, args[1], args[2])
     elif command == "groupdelete":
         remove_group(admin_service, args[1])
         print args[1] + " deleted"
