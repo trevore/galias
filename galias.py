@@ -465,13 +465,14 @@ def main(argv):
     usage = "usage: %prog [options] COMMAND \n\
         \nPossible COMANDS are: \
         \n    listall - List all groups \
-        \n    list <group> - list the specified group \
+        \n    list <group> - list the memebers of <group> \
         \n    list_memberships [addresses] - list group memberships for a list of addresses (or all if addresses are missing) \
         \n    add <group> <destination> <owner> - add the <destination> to the <group> optionally you can specify owner \
         \n    promote <group> <destination> - promote <destination> to an owner of <group> \
         \n    demote <group> <destination> - demote <destination> to member of <group> \
-        \n    create <group> <type> - create a group where type can be [alias, announce, discussion] \
+        \n    create <group> <type> - create <group> where <type> can be [alias, announce, discussion] \
         \n    delete <group> <destination> - delete the <destination> from the <group> \
+        \n    groupdelete <group> - delete whole <group> WITHOUT CONFIRMATION \
         \n    getsettings <group> - output the settings for <group> \
         "
     parser = OptionParser(usage)
@@ -527,8 +528,9 @@ def main(argv):
     group_settings_service = build('groupssettings', 'v1', http=http)
 
     # COMMANDS
-
-    if command == "listall":
+    if args[1] == args[2]:
+        print "ERROR: Group and destination are the same, exiting."
+    elif command == "listall":
         print_all_members(admin_service, config_domain)
     elif command == "list":
         print "listing group", args[1]
@@ -560,6 +562,9 @@ def main(argv):
     elif command == "delete":
         print "%s delete %s" % (args[1], args[2])
         delete_from_group(admin_service, args[1], args[2])
+    elif command == "groupdelete":
+        remove_group(admin_service, args[1])
+        print args[1] + " deleted"
     elif command == "create":
         create_group(admin_service, group_settings_service, args[1], args[2])
     elif command == "getsettings":
