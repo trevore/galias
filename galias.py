@@ -104,12 +104,18 @@ def retry_if_http_error(exception):
 #        wait_exponential_max=10000,
 #        retry_on_exception=retry_if_http_error,
 #        wrap_exception=False)
-def execute_with_backoff(request):
+def execute_with_backoff(request, raiseexceptions = False):
     try:
         response = request.execute()
     except HttpError, e:
-        print 'Error: %d (%s) - %s' % (e.resp.status, e.resp.reason, e._get_reason())
-        sys.exit()
+        if raiseexceptions:
+            raise e
+        elif e._get_reason() == "Member already exists.":
+            print "Member already exists, skipping."
+            return
+        else:
+            print 'Error: %d (%s) - %s' % (e.resp.status, e.resp.reason, e._get_reason())
+            sys.exit()
     return response
 
 
@@ -348,11 +354,26 @@ def print_list_memberships(admin_service, domain, users):
         print_memberships(user, user_memberships[user])
 
 
-def add_to_group(admin_service, group_settings_service, groupid, address, owner=False):
+def add_to_group_from_file(admin_service, group_settings_service, groupid, filename, owner=False):
+    print "Add from file yay"
+    with open(filename) as inputfile:
+        emails = inputfile.readlines()
+        for email in emails:
+            if not email.isspace():
+                print "Adding %s" % email
+                add_to_group(admin_service, group_settings_service, groupid, email.strip(), owner, status=False)
+    print "Current status of group"
+    group_service = admin_service.groups()
+    request = group_service.get(groupKey=groupid)
+    group = execute_with_backoff(request, True)    
+    print_group(admin_service, group)
+
+
+def add_to_group(admin_service, group_settings_service, groupid, address, owner=False, status=True):
     try:
         group_service = admin_service.groups()
         request = group_service.get(groupKey=groupid)
-        group = execute_with_backoff(request)
+        group = execute_with_backoff(request, True)
     except HttpError, e:
         try:
             # Load Json body.
@@ -372,7 +393,8 @@ def add_to_group(admin_service, group_settings_service, groupid, address, owner=
             raise e
     try:
         add_group_member(admin_service, groupid, address, owner)
-        print "Added"
+        if status:
+            print "Added"
     except HttpError, e:
         try:
             # Load Json body.
@@ -390,9 +412,9 @@ def add_to_group(admin_service, group_settings_service, groupid, address, owner=
             print 'Error message: %s' % error.get('message')
             print 'Error reason: %s' % error['errors'][0]['reason']
             raise e
-
-    print "Current status of group"
-    print_group(admin_service, group)
+    if status:
+        print "Current status of group"
+        print_group(admin_service, group)
 
 
 def delete_from_group(admin_service, groupid, address):
@@ -474,8 +496,9 @@ def main(argv):
         \nPossible COMANDS are: \
         \n    listall - List all groups \
         \n    list <group> - list the memebers of <group> \
-        \n    list_memberships [addresses] - list group memberships for a list of addresses (or all if addresses are missing) \
+        \n    listmemberships [addresses] - list group memberships for a list of addresses (or all if addresses are missing) \
         \n    add <group> <destination> <owner> - add the <destination> to the <group> optionally you can specify owner \
+        \n    addfromfile <group> <filen> <owner> - add the emails listed in <file> to <group> optionally as <owners> \
         \n    promote <group> <destination> - promote <destination> to an owner of <group> \
         \n    demote <group> <destination> - demote <destination> to member of <group> \
         \n    create <group> <type> - create <group> where <type> can be [alias, announce, discuss] \
@@ -552,7 +575,7 @@ def main(argv):
     elif command == "list":
         print "listing group", args[1]
         list_group(admin_service, args[1])
-    elif command == "list_memberships":
+    elif command == "listmemberships":
         print "listing group memberships"
         if len(args) == 1:
             print_list_memberships(admin_service, config_domain, [])
@@ -568,6 +591,15 @@ def main(argv):
             print "%s add %s" % (args[1], args[2])
 
         add_to_group(admin_service, group_settings_service, args[1], args[2], owner)
+    elif command == "addfromfile":
+        owner = False
+        if len(args) == 4:
+            if args[3] == "owner":
+                print "%s addusers from %s as owner" % (args[1], args[2])
+                owner = True
+        else:
+            print "%s add users from %s" % (args[1], args[2])
+        add_to_group_from_file(admin_service, group_settings_service, args[1], args[2], owner)
     elif command == "promote":
         print "%s promote %s" % (args[1], args[2])
         delete_from_group(admin_service, args[1], args[2])
