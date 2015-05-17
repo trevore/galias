@@ -19,6 +19,7 @@ from collections import defaultdict
 from optparse import OptionParser
 from optparse import OptionGroup
 import argparse
+import copy
 import simplejson
 import os.path
 import ConfigParser
@@ -71,7 +72,7 @@ globalSettings['description'] = ''
 # globalSettings['primaryLanguage'] = 'en-US'
 
 # Alias specific settings
-aliasSettings = globalSettings
+aliasSettings = copy.copy(globalSettings)
 aliasSettings['whoCanPostMessage'] = 'ANYONE_CAN_POST'
 aliasSettings['messageModerationLevel'] = 'MODERATE_NONE'
 aliasSettings['maxMessageBytes'] = '10240000'
@@ -80,7 +81,7 @@ aliasSettings['showInGroupDirectory'] = 'false'
 aliasSettings['isArchived'] = 'false'
 
 # Discuss specific settings
-discussSettings = globalSettings
+discussSettings = copy.copy(globalSettings)
 discussSettings['whoCanPostMessage'] = 'ALL_MEMBERS_CAN_POST'
 discussSettings['messageModerationLevel'] = 'MODERATE_NONE'
 discussSettings['spamModerationLevel'] = 'MODERATE'
@@ -88,7 +89,7 @@ discussSettings['showInGroupDirectory'] = 'true'
 discussSettings['isArchived'] = 'true'
 
 # Announce specific settings
-announceSettings = globalSettings
+announceSettings = copy.copy(globalSettings)
 announceSettings['whoCanPostMessage'] = 'ALL_MEMBERS_CAN_POST'
 announceSettings['messageModerationLevel'] = 'MODERATE_ALL_MESSAGES'
 announceSettings['spamModerationLevel'] = 'MODERATE'
@@ -112,6 +113,9 @@ def execute_with_backoff(request, raiseexceptions = False):
             raise e
         elif e._get_reason() == "Member already exists.":
             print "Member already exists, skipping."
+            return
+        elif "Resource Not Found:" in e._get_reason():
+            print "Invalid email, skipping."
             return
         else:
             print 'Error: %d (%s) - %s' % (e.resp.status, e.resp.reason, e._get_reason())
@@ -192,6 +196,22 @@ def get_group_settings(group_settings_service, group_name):
     request = group_settings.get(groupUniqueId="trevortest@burningman.org")
     response = execute_with_backoff(request)
     return response
+
+def update_group_settings(admin_service, group_settings_service, group_id, group_type):
+    print "Updating group %s to type %s" % (group_id, group_type)
+    if group_type == "alias":
+        settings = aliasSettings
+    elif group_type == "announce":
+        settings = announceSettings
+    elif group_type == "discuss":
+        settings = discussSettings
+    else:
+        print "Invalid group type: \"" + group_type + "\""
+        sys.exit()
+
+    settings_service = group_settings_service.groups()
+    request = settings_service.patch(groupUniqueId=group_id, body=settings)
+    settings = execute_with_backoff(request)
 
 
 def get_group_members(admin_service, group_email):
@@ -355,7 +375,7 @@ def print_list_memberships(admin_service, domain, users):
 
 
 def add_to_group_from_file(admin_service, group_settings_service, groupid, filename, owner=False):
-    print "Add from file yay"
+    print "Adding group members from " + filename
     with open(filename) as inputfile:
         emails = inputfile.readlines()
         for email in emails:
@@ -505,6 +525,7 @@ def main(argv):
         \n    delete <group> <destination> - delete the <destination> from the <group> \
         \n    groupdelete <group> - delete whole <group> WITHOUT CONFIRMATION \
         \n    getsettings <group> - output the settings for <group> \
+        \n    updatesettings <group> <type> - update the settings of <group> to <type> \
         "
     parser = OptionParser(usage)
 
@@ -618,7 +639,10 @@ def main(argv):
         remove_group(admin_service, args[1])
         print args[1] + " deleted"
     elif command == "create":
+        print "Creating %s as %s" % (args[1], args[2])
         create_group(admin_service, group_settings_service, args[1], args[2])
+    elif command == "updatesettings":
+        update_group_settings(admin_service, group_settings_service, args[1], args[2])
     elif command == "getsettings":
         print_group_settings(group_settings_service, args[1])
     else:
