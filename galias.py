@@ -22,6 +22,7 @@ import argparse
 import simplejson
 import os.path
 import ConfigParser
+import time
 from apiclient.errors import HttpError
 from apiclient.discovery import build
 import httplib2
@@ -209,6 +210,16 @@ def create_group(admin_service, group_settings_service, group_id, group_type=Non
         print "Invalid group type: " + group_type
         group_type = query_group_type()
 
+    if group_type == "alias":
+        settings = aliasSettings
+    elif group_type == "announce":
+        settings = announceSettings
+    elif group_type == "discussion":
+        settings = discussionSettings
+    else:
+        print "Invalid group type: \"" + group_type + "\""
+        sys.exit()
+
     group_service = admin_service.groups()
     body = {}
     body['email'] = group_id
@@ -216,14 +227,7 @@ def create_group(admin_service, group_settings_service, group_id, group_type=Non
 
     request = group_service.insert(body=body)
     group = request.execute()
-
-    if group_type is "alias":
-        settings = aliasSettings
-    elif group_type is "announce":
-        settings = announceSettings
-    elif group_type is "discussion":
-        settings = discussionSettings
-
+    time.sleep(1)
     settings_service = group_settings_service.groups()
     request = settings_service.patch(groupUniqueId=group_id, body=settings)
     settings = request.execute()
@@ -233,7 +237,12 @@ def create_group(admin_service, group_settings_service, group_id, group_type=Non
 def remove_group(admin_service, groupUniqueId):
     group_service = admin_service.groups()
     request = group_service.delete(groupKey=groupUniqueId)
-    response = request.execute()
+    try:
+        response = request.execute()
+    except HttpError, e:
+        print 'Error Status code: %d' % e.resp.status
+        print 'Error Reason: %s' % e.resp.reason
+        sys.exit()    
     return response
 
 
