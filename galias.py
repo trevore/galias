@@ -198,8 +198,12 @@ def get_group_members(admin_service, group_email):
 
 
 def create_group(admin_service, group_settings_service, group_id, group_type=None):
-    if group_type is None or group_type not in VALID_GROUP_TYPES:
+    if group_type is None:
         group_type = query_group_type()
+    elif group_type is not None and group_type not in VALID_GROUP_TYPES:
+        print "Invalid group type: " + group_type
+        group_type = query_group_type()
+
     group_service = admin_service.groups()
     body = {}
     body['email'] = group_id
@@ -228,10 +232,12 @@ def remove_group(admin_service, groupUniqueId):
     return response
 
 
-def add_group_member(admin_service, group_email, email_address):
+def add_group_member(admin_service, group_email, email_address, owner):
     member_service = admin_service.members()
-    request = member_service.insert(groupKey=group_email,
-                                    body={'email': email_address})
+    myRole = "MEMBER"
+    if owner:
+        myRole = "OWNER"
+    request = member_service.insert(groupKey=group_email, body={'email': email_address, 'role': myRole})
     response = request.execute()
     return response
 
@@ -334,7 +340,7 @@ def print_list_memberships(admin_service, domain, users):
         print_memberships(user, user_memberships[user])
 
 
-def add_to_group(admin_service, group_settings_service, groupid, address):
+def add_to_group(admin_service, group_settings_service, groupid, address, owner=False):
     try:
         group_service = admin_service.groups()
         request = group_service.get(groupKey=groupid)
@@ -357,7 +363,7 @@ def add_to_group(admin_service, group_settings_service, groupid, address):
             print 'Error message: %s' % error.get('message')
             raise e
     try:
-        add_group_member(admin_service, groupid, address)
+        add_group_member(admin_service, groupid, address, owner)
         print "Added"
     except HttpError, e:
         try:
@@ -461,7 +467,10 @@ def main(argv):
         \n    listall - List all groups \
         \n    list <group> - list the specified group \
         \n    list_memberships [addresses] - list group memberships for a list of addresses (or all if addresses are missing) \
-        \n    add <group> <destination> - add the <destination> to the <group> \
+        \n    add <group> <destination> <owner> - add the <destination> to the <group> optionally you can specify owner \
+        \n    promote <group> <destination> - promote <destination> to an owner of <group> \
+        \n    demote <group> <destination> - demote <destination> to member of <group> \
+        \n    create <group> <type> - create a group where type can be [alias, announce, discussion] \
         \n    delete <group> <destination> - delete the <destination> from the <group> \
         \n    getsettings <group> - output the settings for <group> \
         "
@@ -531,11 +540,28 @@ def main(argv):
         else:
             print_list_memberships(admin_service, config_domain, args[1:])
     elif command == "add":
-        print "%s add %s" % (args[1], args[2])
-        add_to_group(admin_service, group_settings_service, args[1], args[2])
+        owner = False
+        if len(args) == 4:
+            if args[3] == "owner":
+                print "%s add %s as owner" % (args[1], args[2])
+                owner = True
+        else:
+            print "%s add %s" % (args[1], args[2])
+
+        add_to_group(admin_service, group_settings_service, args[1], args[2], owner)
+    elif command == "promote":
+        print "%s promote %s" % (args[1], args[2])
+        delete_from_group(admin_service, args[1], args[2])
+        add_to_group(admin_service, group_settings_service, args[1], args[2], True)
+    elif command == "demote":
+        print "%s demote %s" % (args[1], args[2])
+        delete_from_group(admin_service, args[1], args[2])
+        add_to_group(admin_service, group_settings_service, args[1], args[2], False)
     elif command == "delete":
         print "%s delete %s" % (args[1], args[2])
         delete_from_group(admin_service, args[1], args[2])
+    elif command == "create":
+        create_group(admin_service, group_settings_service, args[1], args[2])
     elif command == "getsettings":
         print_group_settings(group_settings_service, args[1])
     else:
