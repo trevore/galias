@@ -526,9 +526,18 @@ def main(argv):
 
     admin_service = build('admin', 'directory_v1', http=http)
     group_settings_service = build('groupssettings', 'v1', http=http)
-
+    
+    # Sanatize the input if possible
+    if args[1].endswith("."):
+        print "removing trailing ."
+        args[1] = args[1][:-1]
+    if len(args) > 2 and args[2].endswith("."):
+        print "removing trailing ."
+        args[2] = args[2][:-1]
+    if not args[1].endswith(config_domain):
+        args[1] = args[1] + "@" + config_domain
     # COMMANDS
-    if args[1] == args[2]:
+    if len(args) > 2 and args[1] == args[2]:
         print "ERROR: Group and destination are the same, exiting."
     elif command == "listall":
         print_all_members(admin_service, config_domain)
