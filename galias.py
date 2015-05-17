@@ -55,6 +55,45 @@ with information from the APIs Console <https://code.google.com/apis/console>.
 
 """ % os.path.join(os.path.dirname(__file__), CLIENT_SECRETS)
 
+# List of valid group types
+VALID_GROUP_TYPES = ["alias", "announce", "discussion"]
+
+# API Reference for settings at
+# https://developers.google.com/admin-sdk/groups-settings/v1/reference/groups
+
+# Global settings for all lists
+globalSettings = {}
+globalSettings['sendMessageDenyNotification'] = 'false'
+globalSettings['description'] = ''
+
+# Fuck it, I've tried everything and I can't find a valid value for english --Trevor
+# globalSettings['primaryLanguage'] = 'en-US'
+
+# Alias specific settings
+aliasSettings = globalSettings
+aliasSettings['whoCanPostMessage'] = 'ANYONE_CAN_POST'
+aliasSettings['messageModerationLevel'] = 'MODERATE_NONE'
+aliasSettings['maxMessageBytes'] = '10240000'
+aliasSettings['spamModerationLevel'] = 'ALLOW'
+aliasSettings['showInGroupDirectory'] = 'false'
+aliasSettings['isArchived'] = 'false'
+
+# Discussion specific settings
+discussionSettings = globalSettings
+discussionSettings['whoCanPostMessage'] = 'ALL_MEMBERS_CAN_POST'
+discussionSettings['messageModerationLevel'] = 'MODERATE_NONE'
+discussionSettings['spamModerationLevel'] = 'MODERATE'
+discussionSettings['showInGroupDirectory'] = 'true'
+discussionSettings['isArchived'] = 'true'
+
+# Announce specific settings
+announceSettings = globalSettings
+announceSettings['whoCanPostMessage'] = 'ALL_MEMBERS_CAN_POST'
+announceSettings['messageModerationLevel'] = 'MODERATE_ALL_MESSAGES'
+announceSettings['spamModerationLevel'] = 'MODERATE'
+announceSettings['showInGroupDirectory'] = 'true'
+announceSettings['isArchived'] = 'true'
+
 def retry_if_http_error(exception):
     """Return True if we should retry  False otherwise"""
     return isinstance(exception, HttpError)
@@ -67,6 +106,56 @@ def retry_if_http_error(exception):
 def execute_with_backoff(request):
     response = request.execute()
     return response
+
+
+def query_group_type():
+    valid = {"l": "alias", "L": "alias", "Alias": "alias", "alias": "alias",
+             "d": "discussion", "D": "discussion", "Discussion": "discussion", "discussion": "discussion",
+             "n": "announce", "N": "announce", "Announce": "announce", "announce": "announce"}
+
+    prompt = " [L/D/N] "
+
+    while True:
+        sys.stdout.write("Is this group aLias, aNnounce or Disccusion" + prompt)
+        choice = raw_input().lower()
+        if choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'alias' or 'announce' or 'discussion' "
+                             "(or 'L' or 'N' or 'D').\n")
+
+
+def query_yes_no(question, default="yes"):
+    """Ask a yes/no question via raw_input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+
+    The "answer" return value is True for "yes" or False for "no".
+    """
+    valid = {"yes": True, "y": True, "ye": True,
+             "no": False, "n": False}
+    if default is None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while True:
+        sys.stdout.write(question + prompt)
+        choice = raw_input().lower()
+        if default is not None and choice == '':
+            return valid[default]
+        elif choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "
+                             "(or 'y' or 'n').\n")
 
 
 def get_all_groups(admin_service, domain=None, user=None):
@@ -87,6 +176,13 @@ def get_group(admin_service, group_name):
     return response
 
 
+def get_group_settings(group_settings_service, group_name):
+    group_settings = group_settings_service.groups()
+    request = group_settings.get(groupUniqueId="trevortest@burningman.org")
+    response = execute_with_backoff(request)
+    return response
+
+
 def get_group_members(admin_service, group_email):
     member_service = admin_service.members()
     members = []
@@ -101,18 +197,26 @@ def get_group_members(admin_service, group_email):
     return members
 
 
-def create_group(admin_service, group_settings_service, group_id, group_name,
-                 description, email_permission):
+def create_group(admin_service, group_settings_service, group_id, group_type=None):
+    if group_type is None or group_type not in VALID_GROUP_TYPES:
+        group_type = query_group_type()
     group_service = admin_service.groups()
     body = {}
     body['email'] = group_id
-    body['name'] = group_name
+    body['name'] = group_id.split("@", 1)[0].title() + " " + group_type.title()
+
     request = group_service.insert(body=body)
     group = request.execute()
-    body = {}
-    body['whoCanPostMessage'] = 'ANYONE_CAN_POST'
+
+    if group_type is "alias":
+        settings = aliasSettings
+    elif group_type is "announce":
+        settings = announceSettings
+    elif group_type is "discussion":
+        settings = discussionSettings
+
     settings_service = group_settings_service.groups()
-    request = settings_service.patch(groupUniqueId=group_id, body=body)
+    request = settings_service.patch(groupUniqueId=group_id, body=settings)
     settings = request.execute()
     return group
 
@@ -230,10 +334,10 @@ def print_list_memberships(admin_service, domain, users):
         print_memberships(user, user_memberships[user])
 
 
-def add_to_alias(admin_service, group_settings_service, alias, address):
+def add_to_group(admin_service, group_settings_service, groupid, address):
     try:
         group_service = admin_service.groups()
-        request = group_service.get(groupKey=alias)
+        request = group_service.get(groupKey=groupid)
         group = request.execute()
     except HttpError, e:
         try:
@@ -246,16 +350,14 @@ def add_to_alias(admin_service, group_settings_service, alias, address):
             raise(e)
         reason = error['errors'][0]['reason']
         if error['code'] == 404 and reason == 'notFound':
-            print "New Alias " + alias
-            name = "Alias " + alias
-            group = create_group(admin_service, group_settings_service, alias,
-                                 name, "", "Anyone")
+            print "New group " + groupid
+            group = create_group(admin_service, group_settings_service, groupid)
         else:
             print 'Error code: %d' % error.get('code')
             print 'Error message: %s' % error.get('message')
             raise e
     try:
-        add_group_member(admin_service, alias, address)
+        add_group_member(admin_service, groupid, address)
         print "Added"
     except HttpError, e:
         try:
@@ -268,21 +370,21 @@ def add_to_alias(admin_service, group_settings_service, alias, address):
             raise(e)
         reason = error['errors'][0]['reason']
         if error['code'] == 409 and reason == 'duplicate':
-            print '%s is already a member of %s' % (address, alias)
+            print '%s is already a member of %s' % (address, groupid)
         else:
             print 'Error code: %d' % error.get('code')
             print 'Error message: %s' % error.get('message')
             print 'Error reason: %s' % error['errors'][0]['reason']
             raise e
 
-    print "Current status of alias"
+    print "Current status of group"
     print_group(admin_service, group)
 
 
-def delete_from_alias(admin_service, alias, address):
+def delete_from_group(admin_service, groupid, address):
     try:
         group_service = admin_service.groups()
-        request = group_service.get(groupKey=alias)
+        request = group_service.get(groupKey=groupid)
         group = request.execute()
     except HttpError, e:
         try:
@@ -295,32 +397,36 @@ def delete_from_alias(admin_service, alias, address):
             raise(e)
         reason = error['errors'][0]['reason']
         if error['code'] == 404 and reason == 'notFound':
-            print 'Error: alias %s does not exist' % alias
+            print 'Error: group %s does not exist' % groupid
             exit(1)
         else:
             print 'Error code: %d' % error.get('code')
             print 'Error message: %s' % error.get('message')
             raise e
 
-    if not is_group_member(admin_service, address, alias):
+    if not is_group_member(admin_service, address, groupid):
         print "*" * 70
-        print "* " + address + " is not in " + alias
+        print "* " + address + " is not in " + groupid
         print "*" * 70
     else:
-        response = remove_group_member(admin_service, address, alias)
+        response = remove_group_member(admin_service, address, groupid)
         if not response:
             print "Deleted"
         else:
             print "Error: There was a problem removing the group member"
 
-    members = get_group_members(admin_service, alias)
+    members = get_group_members(admin_service, groupid)
     if not members:
-        if not remove_group(admin_service, group['id']):
-            print "Alias empty, removing alias"
+        answer = query_yes_no("Group empty, delete it?")
+        if answer:
+            if not remove_group(admin_service, group['id']):
+                print "group empty, removing group"
+            else:
+                print "Error removing group"
         else:
-            print "Error removing alias"
+            print "Leaving empty group"
     else:
-        print "Current status of alias"
+        print "Current status of group"
         print_group(admin_service, group)
 
 
@@ -328,6 +434,19 @@ def print_group(admin_service, group):
     gid = group['email']
     print('%s' % (gid)),
     print_members(admin_service, gid)
+
+
+def print_group_settings(group_settings_service, gid):
+    print('%s \n' % (gid)),
+    settings = get_group_settings(group_settings_service, gid)
+    if settings:
+        for setting in settings:
+            try:
+                print setting + ": " + str(settings[setting])
+            except KeyError:
+                continue
+    else:
+        print gid + "-> Empty"
 
 
 def main(argv):
@@ -339,11 +458,12 @@ def main(argv):
 
     usage = "usage: %prog [options] COMMAND \n\
         \nPossible COMANDS are: \
-        \n    listall - List all aliases \
-        \n    list <alias> - list the specified alias \
-        \n    list_memberships [addresses] - list alias memberships for a list of addresses (or all if addresses are missing) \
-        \n    add <alias> <destination> - add the <destination> to the <alias> \
-        \n    delete <alias> <destination> - delete the <destination> from the <alias> \
+        \n    listall - List all groups \
+        \n    list <group> - list the specified group \
+        \n    list_memberships [addresses] - list group memberships for a list of addresses (or all if addresses are missing) \
+        \n    add <group> <destination> - add the <destination> to the <group> \
+        \n    delete <group> <destination> - delete the <destination> from the <group> \
+        \n    getsettings <group> - output the settings for <group> \
         "
     parser = OptionParser(usage)
 
@@ -402,20 +522,22 @@ def main(argv):
     if command == "listall":
         print_all_members(admin_service, config_domain)
     elif command == "list":
-        print "listing alias", args[1]
+        print "listing group", args[1]
         list_group(admin_service, args[1])
     elif command == "list_memberships":
-        print "listing alias memberships"
+        print "listing group memberships"
         if len(args) == 1:
             print_list_memberships(admin_service, config_domain, [])
         else:
             print_list_memberships(admin_service, config_domain, args[1:])
     elif command == "add":
         print "%s add %s" % (args[1], args[2])
-        add_to_alias(admin_service, group_settings_service, args[1], args[2])
+        add_to_group(admin_service, group_settings_service, args[1], args[2])
     elif command == "delete":
         print "%s delete %s" % (args[1], args[2])
-        delete_from_alias(admin_service, args[1], args[2])
+        delete_from_group(admin_service, args[1], args[2])
+    elif command == "getsettings":
+        print_group_settings(group_settings_service, args[1])
     else:
         print "Unknown command"
 
