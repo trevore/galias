@@ -104,7 +104,12 @@ def retry_if_http_error(exception):
 #        retry_on_exception=retry_if_http_error,
 #        wrap_exception=False)
 def execute_with_backoff(request):
-    response = request.execute()
+    try:
+        response = request.execute()
+    except HttpError, e:
+        print 'Error Status code: %d' % e.resp.status
+        print 'Error Reason: %s' % e.resp.reason
+        sys.exit()
     return response
 
 
