@@ -280,12 +280,9 @@ def remove_group(admin_service, groupUniqueId):
     return response
 
 
-def add_group_member(admin_service, group_email, email_address, owner):
+def add_group_member(admin_service, group_email, email_address, role="MEMBER"):
     member_service = admin_service.members()
-    myRole = "MEMBER"
-    if owner:
-        myRole = "OWNER"
-    request = member_service.insert(groupKey=group_email, body={'email': email_address, 'role': myRole})
+    request = member_service.insert(groupKey=group_email, body={'email': email_address, 'role': role})
     response = execute_with_backoff(request)
     return response
 
@@ -341,7 +338,11 @@ def print_members(admin_service, group_email):
     if members:
         for user in members:
             try:
-                print gid + "->", user['email']
+                if user['role'] != "MEMBER":
+                    role = " (" + user['role'] + ")"
+                else:
+                    role = ""
+                print gid + "->", user['email'] + role
                 gid = group_email + " "
             except KeyError:
                 continue
@@ -388,14 +389,14 @@ def print_list_memberships(admin_service, domain, users):
         print_memberships(user, user_memberships[user])
 
 
-def add_to_group_from_file(admin_service, group_settings_service, groupid, filename, owner=False):
+def add_to_group_from_file(admin_service, group_settings_service, groupid, filename, role="MEMBER"):
     print "Adding group members from " + filename
     with open(filename) as inputfile:
         emails = inputfile.readlines()
         for email in emails:
             if not email.isspace():
                 print "Adding %s" % email
-                add_to_group(admin_service, group_settings_service, groupid, email.strip(), owner, status=False)
+                add_to_group(admin_service, group_settings_service, groupid, email.strip(), role, status=False)
     print "Current status of group"
     group_service = admin_service.groups()
     request = group_service.get(groupKey=groupid)
@@ -403,7 +404,7 @@ def add_to_group_from_file(admin_service, group_settings_service, groupid, filen
     print_group(admin_service, group)
 
 
-def add_to_group(admin_service, group_settings_service, groupid, address, owner=False, status=True):
+def add_to_group(admin_service, group_settings_service, groupid, address, role="MEMBER", status=True):
     try:
         group_service = admin_service.groups()
         request = group_service.get(groupKey=groupid)
@@ -426,7 +427,7 @@ def add_to_group(admin_service, group_settings_service, groupid, address, owner=
             print 'Error message: %s' % error.get('message')
             raise e
     try:
-        add_group_member(admin_service, groupid, address, owner)
+        add_group_member(admin_service, groupid, address, role)
         if status:
             print "Added"
     except HttpError, e:
@@ -451,7 +452,7 @@ def add_to_group(admin_service, group_settings_service, groupid, address, owner=
         print_group(admin_service, group)
 
 
-def delete_from_group(admin_service, groupid, address):
+def delete_from_group(admin_service, groupid, address, nopurge=False):
     try:
         group_service = admin_service.groups()
         request = group_service.get(groupKey=groupid)
@@ -486,7 +487,7 @@ def delete_from_group(admin_service, groupid, address):
             print "Error: There was a problem removing the group member"
 
     members = get_group_members(admin_service, groupid)
-    if not members:
+    if not members and nopurge == False:
         answer = query_yes_no("Group empty, delete it?")
         if answer:
             if not remove_group(admin_service, group['id']):
@@ -495,7 +496,7 @@ def delete_from_group(admin_service, groupid, address):
                 print "Error removing group"
         else:
             print "Leaving empty group"
-    else:
+    elif nopurge == False:
         print "Current status of group"
         print_group(admin_service, group)
 
@@ -531,10 +532,11 @@ def main(argv):
         \n    listall - List all groups \
         \n    list <group> - list the memebers of <group> \
         \n    listmemberships [addresses] - list group memberships for a list of addresses (or all if addresses are missing) \
-        \n    add <group> <destination> <owner> - add the <destination> to the <group> optionally you can specify owner \
-        \n    addfromfile <group> <filen> <owner> - add the emails listed in <file> to <group> optionally as <owners> \
-        \n    promote <group> <destination> - promote <destination> to an owner of <group> \
-        \n    demote <group> <destination> - demote <destination> to member of <group> \
+        \n    add <group> <destination> <owner,manager> - add the <destination> to the <group> optionally as <owner> or <manager> \
+        \n    addfromfile <group> <filen> <owner,manager> - add the emails listed in <file> to <group> optionally as <owner> or <manager> \
+        \n    owner <group> <destination> - set <destination> to an owner of <group> \
+        \n    manager <group> <destination> - set <destination> to a manager of <group> \
+        \n    member <group> <destination> - set <destination> to member of <group> \
         \n    create <group> <type> - create <group> where <type> can be [alias, announce, discuss] \
         \n    delete <group> <destination> - delete the <destination> from the <group> \
         \n    groupdelete <group> - delete whole <group> WITHOUT CONFIRMATION \
@@ -594,13 +596,13 @@ def main(argv):
     group_settings_service = build('groupssettings', 'v1', http=http)
     
     # Sanatize the input if possible
-    if args[1].endswith("."):
+    if len(args) > 1 and args[1].endswith("."):
         print "removing trailing ."
         args[1] = args[1][:-1]
     if len(args) > 2 and args[2].endswith("."):
         print "removing trailing ."
         args[2] = args[2][:-1]
-    if not args[1].endswith(config_domain):
+    if len(args) > 1 and not args[1].endswith(config_domain):
         args[1] = args[1] + "@" + config_domain
     # COMMANDS
     if len(args) > 2 and args[1] == args[2]:
@@ -617,32 +619,40 @@ def main(argv):
         else:
             print_list_memberships(admin_service, config_domain, args[1:])
     elif command == "add":
-        owner = False
+        role = "MEMBER"
         if len(args) == 4:
-            if args[3] == "owner":
-                print "%s add %s as owner" % (args[1], args[2])
-                owner = True
+            if string.lower(args[3]) == "owner" or args[3] == "manager":
+                print "%s add %s as %s" % (args[1], args[2], args[3])
+                role = args[3]
+            else:
+                print "You can only set people as owner or manager or leave blank for normal member."                
         else:
             print "%s add %s" % (args[1], args[2])
 
-        add_to_group(admin_service, group_settings_service, args[1], args[2], owner)
+        add_to_group(admin_service, group_settings_service, args[1], args[2], role.upper())
     elif command == "addfromfile":
-        owner = False
+        role = "MEMBER"
         if len(args) == 4:
-            if args[3] == "owner":
-                print "%s addusers from %s as owner" % (args[1], args[2])
-                owner = True
+            if args[3].lower() == "owner" or args[3] == "manager":
+                print "%s addusers from %s as %s" % (args[1], args[2], args[3])
+                role = args[3]
+            else:
+                print "You can only set people as owner or manager or leave blank for normal member."
         else:
             print "%s add users from %s" % (args[1], args[2])
-        add_to_group_from_file(admin_service, group_settings_service, args[1], args[2], owner)
-    elif command == "promote":
-        print "%s promote %s" % (args[1], args[2])
-        delete_from_group(admin_service, args[1], args[2])
-        add_to_group(admin_service, group_settings_service, args[1], args[2], True)
-    elif command == "demote":
-        print "%s demote %s" % (args[1], args[2])
-        delete_from_group(admin_service, args[1], args[2])
-        add_to_group(admin_service, group_settings_service, args[1], args[2], False)
+        add_to_group_from_file(admin_service, group_settings_service, args[1], args[2], role.upper())
+    elif command == "owner":
+        print "%s set %s to owner" % (args[1], args[2])
+        delete_from_group(admin_service, args[1], args[2], nopurge=True)
+        add_to_group(admin_service, group_settings_service, args[1], args[2], role="OWNER")
+    elif command == "manager":
+        print "%s set %s to manager" % (args[1], args[2])
+        delete_from_group(admin_service, args[1], args[2], nopurge=True)
+        add_to_group(admin_service, group_settings_service, args[1], args[2], role="MANAGER")
+    elif command == "member":
+        print "%s set %s to member" % (args[1], args[2])
+        delete_from_group(admin_service, args[1], args[2], nopurge=True)
+        add_to_group(admin_service, group_settings_service, args[1], args[2], role="MEMBER")
     elif command == "delete":
         if len(args) < 3:
             print "ERROR: Missing <destination>. Use groupdelete to delete the whole group."
