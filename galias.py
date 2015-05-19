@@ -67,6 +67,11 @@ VALID_GROUP_TYPES = ["alias", "announce", "discuss"]
 globalSettings = {}
 globalSettings['sendMessageDenyNotification'] = 'false'
 globalSettings['description'] = ''
+globalSettings['whoCanViewGroup'] = 'ALL_MEMBERS_CAN_VIEW'
+globalSettings['allowExternalMembers'] = 'true'
+globalSettings['whoCanInvite'] = 'ALL_MANAGERS_CAN_INVITE'
+globalSettings['whoCanContactOwner'] = 'ALL_MEMBERS_CAN_CONTACT'
+globalSettings['whoCanViewMembership'] = 'ALL_MANAGERS_CAN_VIEW'
 
 # Fuck it, I've tried everything and I can't find a valid value for english --Trevor
 # globalSettings['primaryLanguage'] = 'en-US'
@@ -79,6 +84,8 @@ aliasSettings['maxMessageBytes'] = '10240000'
 aliasSettings['spamModerationLevel'] = 'ALLOW'
 aliasSettings['showInGroupDirectory'] = 'false'
 aliasSettings['isArchived'] = 'false'
+aliasSettings['whoCanJoin'] = 'INVITED_CAN_JOIN'
+aliasSettings['membersCanPostAsTheGroup'] = 'true'
 
 # Discuss specific settings
 discussSettings = copy.copy(globalSettings)
@@ -87,14 +94,18 @@ discussSettings['messageModerationLevel'] = 'MODERATE_NONE'
 discussSettings['spamModerationLevel'] = 'MODERATE'
 discussSettings['showInGroupDirectory'] = 'true'
 discussSettings['isArchived'] = 'true'
+discussSettings['whoCanJoin'] = 'INVITED_CAN_JOIN'
+discussSettings['membersCanPostAsTheGroup'] = 'false'
 
 # Announce specific settings
 announceSettings = copy.copy(globalSettings)
-announceSettings['whoCanPostMessage'] = 'ALL_MEMBERS_CAN_POST'
+announceSettings['whoCanPostMessage'] = 'ALL_MANAGERS_CAN_POST'
 announceSettings['messageModerationLevel'] = 'MODERATE_ALL_MESSAGES'
 announceSettings['spamModerationLevel'] = 'MODERATE'
 announceSettings['showInGroupDirectory'] = 'true'
 announceSettings['isArchived'] = 'true'
+announceSettings['whoCanJoin'] = 'CAN_REQUEST_TO_JOIN'
+announceSettings['membersCanPostAsTheGroup'] = 'false'
 
 def retry_if_http_error(exception):
     """Return True if we should retry  False otherwise"""
@@ -116,6 +127,9 @@ def execute_with_backoff(request, raiseexceptions = False):
             return
         elif "Resource Not Found:" in e._get_reason():
             print "Invalid email, skipping."
+            return
+        elif "Invalid Input: memberKey" in e._get_reason():
+            print "Invalid memeber, skipping."
             return
         else:
             print 'Error: %d (%s) - %s' % (e.resp.status, e.resp.reason, e._get_reason())
