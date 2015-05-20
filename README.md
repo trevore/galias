@@ -21,6 +21,14 @@ Possible COMMANDS are:
 * `list_memberships [addresses]` - list alias memberships for an optional list of addresses
 * `add <alias> <destination>` - add the `<destination>` to the `<alias>`
 * `delete <alias> <destination>` - delete the `<destination>` from the `<alias>`
+* `addfromfile <group> <filen> <owner,manager>` - add the emails listed in `<file>` to `<group>` optionally as `<owner>` or `<manager>`
+* `owner <group> <destination>` - set `<destination>` to an owner of `<group>`
+* `manager <group> <destination>` - set `<destination>` to a manager of `<group>`
+* `member <group> <destination>` - set `<destination>` to member of `<group>`
+* `create <group> <type>` - create `<group>` where `<type>` can be [alias, announce, discuss]
+* `groupdelete <group>` - delete whole `<group> `WITHOUT CONFIRMATION
+* `getsettings <group>` - output the settings for `<group>`
+* `updatesettings <group> <type>` - update the settings of `<group>` to `<type>`
 
 
 Options:
