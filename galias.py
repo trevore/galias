@@ -131,7 +131,7 @@ def execute_with_backoff(request, raiseexceptions = False, existCheck = False):
             return
         elif "Invalid Input: memberKey" in e._get_reason():
             print "Invalid memeber, skipping."
-            return
+            return "Invalid memberKey"
         else:
             print 'Error: %d (%s) - %s' % (e.resp.status, e.resp.reason, e._get_reason())
             sys.exit()
@@ -287,6 +287,18 @@ def add_group_member(admin_service, group_email, email_address, role="MEMBER", e
     response = execute_with_backoff(request, existCheck)
     return response
 
+def replace_group_member_expanding_groups(admin_service, group_email, email_address, role="MEMBER", existCheck=False):
+    result = add_group_member(admin_service, group_email, email_address, role, existCheck)
+    if "Invalid memberKey" in result:
+        isGroup = group_exists(admin_service, email_address)
+        if isGroup:
+            members = get_group_members(admin_service, email_address)
+            for member in members:
+                member_email = member['email']
+                delete_from_group(admin_service, group_email, member_email, nopurge=True, quiet=True)
+                result = replace_group_member_expanding_groups(admin_service, group_email, member_email, role, existCheck)
+    return result
+
 
 def remove_group_member(admin_service, email_address, group_email):
     member_service = admin_service.members()
@@ -331,6 +343,19 @@ def print_all_members(admin_service, domain):
 def list_group(admin_service, group_email):
     group = get_group(admin_service, group_email)
     print_group(admin_service, group)
+
+
+def group_exists(admin_service, group_email):
+    group = get_group(admin_service, group_email)
+    if group is None:
+        return False
+    else:
+        return True
+
+
+def count_group(admin_service, group_email):
+    group = get_group(admin_service, group_email)
+    return group['directMembersCount']
 
 
 def print_members(admin_service, group_email):
@@ -433,7 +458,10 @@ def add_to_group(admin_service, group_settings_service, groupid, address, role="
             print 'Error message: %s' % error.get('message')
             raise e
     try:
-        add_group_member(admin_service, groupid, address, role, existCheck)
+        if "MEMBER" not in role:
+            result = replace_group_member_expanding_groups(admin_service, groupid, address, role, existCheck)
+        else:
+            result = add_group_member(admin_service, groupid, address, role, existCheck)
         if status:
             print "Added"
     except HttpError, e:
@@ -657,15 +685,15 @@ def main(argv):
             print "Skipping empty file"
     elif command == "owner":
         print "%s set %s to owner" % (args[1], args[2])
-        delete_from_group(admin_service, args[1], args[2], nopurge=True)
+        delete_from_group(admin_service, args[1], args[2], nopurge=True, quiet=True)
         add_to_group(admin_service, group_settings_service, args[1], args[2], role="OWNER")
     elif command == "manager":
         print "%s set %s to manager" % (args[1], args[2])
-        delete_from_group(admin_service, args[1], args[2], nopurge=True)
+        delete_from_group(admin_service, args[1], args[2], nopurge=True, quiet=True)
         add_to_group(admin_service, group_settings_service, args[1], args[2], role="MANAGER")
     elif command == "member":
         print "%s set %s to member" % (args[1], args[2])
-        delete_from_group(admin_service, args[1], args[2], nopurge=True)
+        delete_from_group(admin_service, args[1], args[2], nopurge=True, quiet=True)
         add_to_group(admin_service, group_settings_service, args[1], args[2], role="MEMBER")
     elif command == "delete":
         if len(args) < 3:
