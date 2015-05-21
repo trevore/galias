@@ -116,14 +116,15 @@ def retry_if_http_error(exception):
 #        wait_exponential_max=10000,
 #        retry_on_exception=retry_if_http_error,
 #        wrap_exception=False)
-def execute_with_backoff(request, raiseexceptions = False):
+def execute_with_backoff(request, raiseexceptions = False, existCheck = False):
     try:
         response = request.execute()
     except HttpError, e:
         if raiseexceptions:
             raise e
         elif e._get_reason() == "Member already exists.":
-            print "Member already exists, skipping."
+            if not existCheck:
+                print "Member already exists, skipping."
             return
         elif "Resource Not Found:" in e._get_reason():
             print "Invalid email, skipping."
@@ -280,10 +281,10 @@ def remove_group(admin_service, groupUniqueId):
     return response
 
 
-def add_group_member(admin_service, group_email, email_address, role="MEMBER"):
+def add_group_member(admin_service, group_email, email_address, role="MEMBER", existCheck=False):
     member_service = admin_service.members()
     request = member_service.insert(groupKey=group_email, body={'email': email_address, 'role': role})
-    response = execute_with_backoff(request)
+    response = execute_with_backoff(request, existCheck)
     return response
 
 
@@ -396,7 +397,7 @@ def add_to_group_from_file(admin_service, group_settings_service, groupid, filen
         for email in emails:
             if not email.isspace():
                 print "Adding %s" % email
-                add_to_group(admin_service, group_settings_service, groupid, email.strip(), role, status=False)
+                add_to_group(admin_service, group_settings_service, groupid, email.strip(), role, status=False, existCheck=True)
     print "Current status of group"
     group_service = admin_service.groups()
     request = group_service.get(groupKey=groupid)
@@ -404,7 +405,8 @@ def add_to_group_from_file(admin_service, group_settings_service, groupid, filen
     print_group(admin_service, group)
 
 
-def add_to_group(admin_service, group_settings_service, groupid, address, role="MEMBER", status=True):
+def add_to_group(admin_service, group_settings_service, groupid, address, role="MEMBER", status=True, existCheck=False):
+    exists = False
     try:
         group_service = admin_service.groups()
         request = group_service.get(groupKey=groupid)
@@ -427,7 +429,7 @@ def add_to_group(admin_service, group_settings_service, groupid, address, role="
             print 'Error message: %s' % error.get('message')
             raise e
     try:
-        add_group_member(admin_service, groupid, address, role)
+        add_group_member(admin_service, groupid, address, role, existCheck)
         if status:
             print "Added"
     except HttpError, e:
@@ -441,7 +443,12 @@ def add_to_group(admin_service, group_settings_service, groupid, address, role="
             raise(e)
         reason = error['errors'][0]['reason']
         if error['code'] == 409 and reason == 'duplicate':
-            print '%s is already a member of %s' % (address, groupid)
+            if existCheck:
+                print "%s set %s to %s" % (groupid, address, role)
+                delete_from_group(admin_service, groupid, address, nopurge=True, quiet=True)
+                add_to_group(admin_service, group_settings_service, groupid, address, role=role, status=status)
+            else:
+                print '%s is already a member of %s' % (address, groupid)
         else:
             print 'Error code: %d' % error.get('code')
             print 'Error message: %s' % error.get('message')
@@ -452,7 +459,7 @@ def add_to_group(admin_service, group_settings_service, groupid, address, role="
         print_group(admin_service, group)
 
 
-def delete_from_group(admin_service, groupid, address, nopurge=False):
+def delete_from_group(admin_service, groupid, address, nopurge=False, quiet=False):
     try:
         group_service = admin_service.groups()
         request = group_service.get(groupKey=groupid)
@@ -481,9 +488,9 @@ def delete_from_group(admin_service, groupid, address, nopurge=False):
         print "*" * 70
     else:
         response = remove_group_member(admin_service, address, groupid)
-        if not response:
+        if not response and not quiet:
             print "Deleted"
-        else:
+        elif not quiet:
             print "Error: There was a problem removing the group member"
 
     members = get_group_members(admin_service, groupid)
