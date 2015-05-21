@@ -116,13 +116,11 @@ def retry_if_http_error(exception):
 #        wait_exponential_max=10000,
 #        retry_on_exception=retry_if_http_error,
 #        wrap_exception=False)
-def execute_with_backoff(request, raiseexceptions = False, existCheck = False):
+def execute_with_backoff(request, existCheck = False):
     try:
         response = request.execute()
     except HttpError, e:
-        if raiseexceptions:
-            raise e
-        elif e._get_reason() == "Member already exists.":
+        if e._get_reason() == "Member already exists.":
             if not existCheck:
                 print "Member already exists, skipping."
             return
@@ -288,13 +286,16 @@ def add_group_member(admin_service, group_email, email_address, role="MEMBER", e
     return response
 
 def replace_group_member_expanding_groups(admin_service, group_email, email_address, role="MEMBER", existCheck=False):
+    delete_from_group(admin_service, group_email, email_address, nopurge=True, quiet=True)
     result = add_group_member(admin_service, group_email, email_address, role, existCheck)
     if "Invalid memberKey" in result:
         isGroup = group_exists(admin_service, email_address)
         if isGroup:
             members = get_group_members(admin_service, email_address)
+            print "Expanding to:"
             for member in members:
                 member_email = member['email']
+                print member_email
                 delete_from_group(admin_service, group_email, member_email, nopurge=True, quiet=True)
                 result = replace_group_member_expanding_groups(admin_service, group_email, member_email, role, existCheck)
     return result
