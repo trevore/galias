@@ -391,13 +391,17 @@ def print_list_memberships(admin_service, domain, users):
 
 
 def add_to_group_from_file(admin_service, group_settings_service, groupid, filename, role="MEMBER"):
+    existCheck = False
+    if "MEMBER" not in role:
+        existCheck = True
+
     print "Adding group members from " + filename
     with open(filename) as inputfile:
         emails = inputfile.readlines()
         for email in emails:
             if not email.isspace():
                 print "Adding %s" % email
-                add_to_group(admin_service, group_settings_service, groupid, email.strip(), role, status=False, existCheck=True)
+                add_to_group(admin_service, group_settings_service, groupid, email.strip(), role, status=False, existCheck=existCheck)
     print "Current status of group"
     group_service = admin_service.groups()
     request = group_service.get(groupKey=groupid)
