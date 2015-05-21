@@ -651,7 +651,10 @@ def main(argv):
                 print "You can only set people as owner or manager or leave blank for normal member."
         else:
             print "%s add users from %s" % (args[1], args[2])
-        add_to_group_from_file(admin_service, group_settings_service, args[1], args[2], role.upper())
+        if not os.stat(args[2]).st_size == 0:
+            add_to_group_from_file(admin_service, group_settings_service, args[1], args[2], role.upper())
+        else:
+            print "Skipping empty file"
     elif command == "owner":
         print "%s set %s to owner" % (args[1], args[2])
         delete_from_group(admin_service, args[1], args[2], nopurge=True)
