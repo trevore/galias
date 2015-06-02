@@ -125,7 +125,8 @@ def execute_with_backoff(request, existCheck = False):
                 print "Member already exists, skipping."
             return
         elif "Resource Not Found:" in e._get_reason():
-            print "Invalid email, skipping."
+            if not existCheck:
+                print "Invalid email, skipping."
             return
         elif "Invalid Input: memberKey" in e._get_reason():
             print "Invalid memeber, skipping."
@@ -314,8 +315,9 @@ def is_group_member(admin_service, email_address, group_email):
         member_service = admin_service.members()
         request = member_service.get(groupKey=group_email,
                                      memberKey=email_address)
-        response = execute_with_backoff(request)
-        return True
+        response = execute_with_backoff(request, existCheck=True)
+        if response is None:
+            return False
     except HttpError, e:
         try:
             # Load Json body.
@@ -516,9 +518,8 @@ def delete_from_group(admin_service, groupid, address, nopurge=False, quiet=Fals
             raise e
 
     if not is_group_member(admin_service, address, groupid):
-        print "*" * 70
-        print "* " + address + " is not in " + groupid
-        print "*" * 70
+        print address + " is not in " + groupid
+
     else:
         response = remove_group_member(admin_service, address, groupid)
         if not response and not quiet:
@@ -686,15 +687,15 @@ def main(argv):
             print "Skipping empty file"
     elif command == "owner":
         print "%s set %s to owner" % (args[1], args[2])
-        delete_from_group(admin_service, args[1], args[2], nopurge=True, quiet=True)
+        #delete_from_group(admin_service, args[1], args[2], nopurge=True, quiet=True)
         add_to_group(admin_service, group_settings_service, args[1], args[2], role="OWNER")
     elif command == "manager":
         print "%s set %s to manager" % (args[1], args[2])
-        delete_from_group(admin_service, args[1], args[2], nopurge=True, quiet=True)
+        #delete_from_group(admin_service, args[1], args[2], nopurge=True, quiet=True)
         add_to_group(admin_service, group_settings_service, args[1], args[2], role="MANAGER")
     elif command == "member":
         print "%s set %s to member" % (args[1], args[2])
-        delete_from_group(admin_service, args[1], args[2], nopurge=True, quiet=True)
+        #delete_from_group(admin_service, args[1], args[2], nopurge=True, quiet=True)
         add_to_group(admin_service, group_settings_service, args[1], args[2], role="MEMBER")
     elif command == "delete":
         if len(args) < 3:
