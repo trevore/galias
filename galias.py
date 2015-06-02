@@ -99,7 +99,7 @@ discussSettings['membersCanPostAsTheGroup'] = 'false'
 
 # Announce specific settings
 announceSettings = copy.copy(globalSettings)
-announceSettings['whoCanPostMessage'] = 'ALL_MANAGERS_CAN_POST'
+announceSettings['whoCanPostMessage'] = 'ALL_MEMBERS_CAN_POST'
 announceSettings['messageModerationLevel'] = 'MODERATE_ALL_MESSAGES'
 announceSettings['spamModerationLevel'] = 'MODERATE'
 announceSettings['showInGroupDirectory'] = 'true'
